@@ -322,8 +322,12 @@ void LayerSurferTransformationPlugin::createDataLatest()
                Dataset<Points> childDataPoint= mv::data().createDataset("Points", ds->getGuiName() + "/" + child->getGuiName(), ds);
                 events().notifyDatasetAdded(childDataPoint);
                 int numOfDimsChild = childFull->getNumDimensions();
+                std::vector<int> allDimschild;
+                for (int i = 0; i < numOfDimsChild; ++i) {
+                    allDimschild.push_back(i);
+                }
                 std::vector<float> splitChildData(_clusterIndices.size() * numOfDimsChild);
-                childFull->populateDataForDimensions(splitChildData, allDims, _clusterIndices);
+                childFull->populateDataForDimensions(splitChildData, allDimschild, _clusterIndices);
                 childDataPoint->setData(splitChildData.data(), _clusterIndices.size(), numOfDimsChild);
                 childDataPoint->setDimensionNames(childFull->getDimensionNames());
                 events().notifyDatasetDataChanged(childDataPoint);
