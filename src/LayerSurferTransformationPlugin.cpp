@@ -89,67 +89,6 @@ void LayerSurferTransformationPlugin::transform()
     }
     createDataLatest();
 
-
-    /*
-    switch (_type)
-    {
-        // Transform points in place
-        case LayerSurferTransformationPlugin::Type::Abs:
-        {
-            points->setLocked(true);
-
-            points->visitData([this, &points, &datasetTask](auto pointData) {
-                std::uint32_t noPointsProcessed = 0;
-
-                for (auto point : pointData) {
-                    for (std::uint32_t dimensionIndex = 0; dimensionIndex < points->getNumDimensions(); dimensionIndex++) {
-                        point[dimensionIndex] = std::abs(static_cast<double>(point[dimensionIndex]));
-                    }
-
-                    ++noPointsProcessed;
-
-                    if (noPointsProcessed % 1000 == 0) {
-                        datasetTask.setProgress(static_cast<float>(noPointsProcessed) / static_cast<float>(points->getNumPoints()));
-
-                        QApplication::processEvents();
-                    }
-                }
-                });
-
-            points.setProperty("Last transformed by", getName());
-            points->setLocked(false);
-
-            events().notifyDatasetDataChanged(points);
-
-            break;
-        }
-        // Create new data set
-        case LayerSurferTransformationPlugin::Type::Pow2:
-        {
-            auto derivedData = mv::data().createDerivedDataset<Points>(points->getGuiName() + " (Pow2)", points);
-
-            std::vector<float> transformedData;
-            transformedData.resize(points->getNumPoints() * points->getNumDimensions());
-
-            points->constVisitFromBeginToEnd([&transformedData](auto begin, auto end) {
-                std::uint32_t noItemsProcessed = 0;
-
-                for (auto it = begin; it != end; ++it) {
-                    transformedData[noItemsProcessed] = std::pow(*it, 2.0f);
-                    noItemsProcessed++;
-                }
-                });
-
-
-            derivedData->setData(transformedData.data(), points->getNumPoints(), points->getNumDimensions());
-            events().notifyDatasetDataChanged(derivedData);
-
-            break;
-        }
-        default:
-            break;
-    }
-    */
     datasetTask.setProgress(1.0f);
     datasetTask.setFinished();
 
@@ -278,96 +217,127 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
 
 void LayerSurferTransformationPlugin::createDataLatest()
 {
+    // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
-    qDebug() << "createDataOptimized: ENTER";
+    qDebug() << "createDataLatest: ENTER";
 
-
+    // List to keep track of datasets that need to be notified after processing
     mv::Datasets datasetsToNotify;
-    qDebug() << "createDataOptimized: Step 1 - Collect indices";
 
-
+    // === Step 1: Process the main Points dataset ===
     qDebug() << "Step 1 - Process main Points dataset";
-    
 
-        Dataset<Points> mainDataset = getInputDataset<Points>();
-        auto children = mainDataset->getChildren();
-        qDebug() << "childrenDatasets.size() =" << children.size();
+    // Retrieve the main input Points dataset
+    Dataset<Points> inputPointsDataset = getInputDataset<Points>();
+    auto childDatasets = inputPointsDataset->getChildren();
+    qDebug() << "Number of child datasets =" << childDatasets.size();
 
-        int numDim = mainDataset->getNumDimensions();
-        auto dimNames = mainDataset->getDimensionNames();
-        std::vector<int> allDims(numDim);
-        std::iota(allDims.begin(), allDims.end(), 0);
-        QString dsName = mainDataset->getGuiName() + "/" + _clusterDatasetNameSelection + "/" + _clusterNameSelection;
-        Dataset<Points> ds = mv::data().createDataset("Points", dsName);
-        events().notifyDatasetAdded(ds);
-        
-        std::vector<float>splitData(_clusterIndices.size() * numDim);
-        mainDataset->populateDataForDimensions(splitData, allDims, _clusterIndices);
-        ds->setData(splitData.data(), _clusterIndices.size(), numDim);
-        ds->setDimensionNames(dimNames);
-        events().notifyDatasetDataChanged(ds);
-        qDebug() << "Step 1 - Finished processing main Points dataset";
-        qDebug() << "Step 2 - Collect indices for dataset 1";
+    int numDimensions = inputPointsDataset->getNumDimensions();
+    auto dimensionNames = inputPointsDataset->getDimensionNames();
 
-        int idx = 0;
-        for (const Dataset<Clusters>& child : children) {
-            qDebug() << "Processing child" << idx
-                << "name:" << child->getGuiName()
-                << "type:" << child->getDataType().getTypeString();
+    // Prepare a vector with all dimension indices
+    std::vector<int> allDimensionIndices(numDimensions);
+    std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
-            if (child->getDataType() == PointType) {
-                Dataset<Points> childFull = child->getFullDataset<Points>();
-                if (!childFull.isValid()) continue;
+    // Construct a descriptive name for the new dataset
+    QString newDatasetName = inputPointsDataset->getGuiName() + "/" + _clusterDatasetNameSelection + "/" + _clusterNameSelection;
 
-               Dataset<Points> childDataPoint= mv::data().createDataset("Points", ds->getGuiName() + "/" + child->getGuiName(), ds);
-                events().notifyDatasetAdded(childDataPoint);
-                int numOfDimsChild = childFull->getNumDimensions();
-                std::vector<int> allDimschild;
-                for (int i = 0; i < numOfDimsChild; ++i) {
-                    allDimschild.push_back(i);
-                }
-                std::vector<float> splitChildData(_clusterIndices.size() * numOfDimsChild);
-                childFull->populateDataForDimensions(splitChildData, allDimschild, _clusterIndices);
-                childDataPoint->setData(splitChildData.data(), _clusterIndices.size(), numOfDimsChild);
-                childDataPoint->setDimensionNames(childFull->getDimensionNames());
-                events().notifyDatasetDataChanged(childDataPoint);
-                qDebug() << "Finished processing point-type child" << idx;
+    // Create a new Points dataset for the selected cluster
+    Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
+    events().notifyDatasetAdded(clusterPointsDataset);
 
+    // Extract and set the data for the selected cluster indices
+    std::vector<float> clusterPointsData(_clusterIndices.size() * numDimensions);
+    inputPointsDataset->populateDataForDimensions(clusterPointsData, allDimensionIndices, _clusterIndices);
+    clusterPointsDataset->setData(clusterPointsData.data(), _clusterIndices.size(), numDimensions);
+    clusterPointsDataset->setDimensionNames(dimensionNames);
+    datasetsToNotify.push_back(clusterPointsDataset);
+
+
+    qDebug() << "Step 1 - Finished processing main Points dataset";
+
+    // === Step 2: Process child datasets (Points and Clusters) ===
+    qDebug() << "Step 2 - Process child datasets";
+
+    int childIndex = 0;
+    for (const Dataset<Clusters>& child : childDatasets) {
+        qDebug() << "Processing child" << childIndex
+                 << "name:" << child->getGuiName()
+                 << "type:" << child->getDataType().getTypeString();
+
+        // If the child is a Points dataset, extract and create a corresponding subset
+        if (child->getDataType() == PointType) {
+            Dataset<Points> fullChildPoints = child->getFullDataset<Points>();
+            if (!fullChildPoints.isValid()) {
+                ++childIndex;
+                continue;
             }
-            else if (child->getDataType() == ClusterType) {
-                qDebug() << "Processing cluster-type child" << idx;
-                Dataset<Clusters> cFull = child->getFullDataset<Clusters>();
-                if (!cFull.isValid()) continue;
-                
 
-                Dataset<Clusters> clData = mv::data().createDataset("Cluster", ds->getGuiName() + "/" + child->getGuiName(), ds);
-                events().notifyDatasetAdded(clData);
+            // Create a new Points dataset for the child, as a subset of the cluster
+            Dataset<Points> childClusterPoints = mv::data().createDataset(
+                "Points",
+                clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
+                clusterPointsDataset
+            );
+            events().notifyDatasetAdded(childClusterPoints);
 
+            int childNumDimensions = fullChildPoints->getNumDimensions();
+            std::vector<int> childDimensionIndices(childNumDimensions);
+            std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
 
-                for (const auto& cluster : cFull->getClusters()) {
-                    std::vector<std::seed_seq::result_type> i1;
-                    const auto& indices = cluster.getIndices();
-                    for (int i : indices) {
-                        if (auto it = _clusterIndicesMap.find(i); it != _clusterIndicesMap.end())
-                        {
-                            i1.push_back(it->second);
-                        }
-  
-                    }
-                    Cluster a = cluster;
-                    a.setIndices(i1);
-                    clData->addCluster(a);
+            std::vector<float> childClusterData(_clusterIndices.size() * childNumDimensions);
+            fullChildPoints->populateDataForDimensions(childClusterData, childDimensionIndices, _clusterIndices);
+            childClusterPoints->setData(childClusterData.data(), _clusterIndices.size(), childNumDimensions);
+            childClusterPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+            datasetsToNotify.push_back(childClusterPoints);
 
-                }
-
-                datasetsToNotify.push_back(clData);
-
-                qDebug() << "Finished processing cluster-type child" << idx;
-            }
-            ++idx;
+            qDebug() << "Finished processing point-type child" << childIndex;
         }
+        // If the child is a Clusters dataset, create a corresponding subset of clusters
+        else if (child->getDataType() == ClusterType) {
+            qDebug() << "Processing cluster-type child" << childIndex;
+            Dataset<Clusters> fullChildClusters = child->getFullDataset<Clusters>();
+            if (!fullChildClusters.isValid()) {
+                ++childIndex;
+                continue;
+            }
 
-    
+            // Create a new Clusters dataset for the child, as a subset of the cluster
+            Dataset<Clusters> childClusterDataset = mv::data().createDataset(
+                "Cluster",
+                clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
+                clusterPointsDataset
+            );
+            events().notifyDatasetAdded(childClusterDataset);
 
-    qDebug() << "createDataOptimized: EXIT";
+            // For each cluster in the child, remap indices to the new cluster subset
+            for (const auto& cluster : fullChildClusters->getClusters()) {
+                std::vector<std::seed_seq::result_type> remappedIndices;
+                const auto& originalIndices = cluster.getIndices();
+                for (int idx : originalIndices) {
+                    // Only include indices that are present in the selected cluster
+                    if (auto it = _clusterIndicesMap.find(idx); it != _clusterIndicesMap.end()) {
+                        remappedIndices.push_back(it->second);
+                    }
+                }
+                Cluster remappedCluster = cluster;
+                remappedCluster.setIndices(remappedIndices);
+                childClusterDataset->addCluster(remappedCluster);
+            }
+
+            datasetsToNotify.push_back(childClusterDataset);
+
+            qDebug() << "Finished processing cluster-type child" << childIndex;
+        }
+        ++childIndex;
+    }
+
+    qDebug() << "Step 2 - Finished processing child datasets";
+    // === Step 3: Notify all datasets that were created or modified ===
+    qDebug() << "Step 3 - Notify datasets";
+    for (const auto& dataset : datasetsToNotify) {
+        events().notifyDatasetDataChanged(dataset);
+    }
+
+    qDebug() << "createDataLatest: EXIT";
 }
