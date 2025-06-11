@@ -81,44 +81,65 @@ void LayerSurferTransformationPlugin::createDatasetsMultInit(mv::Dataset<Points>
     _clusterIndicesMap.clear();
     _clusterIndices.clear();
 
+    bool foundClusters = false;
+    int totalClusters = 0;
+    int processedClusters = 0;
+
+    // First, count total clusters for progress calculation
+    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
+            auto clusters = child->getClusters();
+            totalClusters = static_cast<int>(clusters.size());
+            foundClusters = true;
+            break;
+        }
+    }
+
+    if (!foundClusters || totalClusters == 0) {
+        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
 
     for (const mv::Dataset<Clusters>& child : points->getChildren()) {
         if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
             _clustersDataset = child;
-            if (!_clustersDataset.isValid()) {
-                datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
-                datasetTask.setFinished();
-                return;
-            }
             auto clusters = _clustersDataset->getClusters();
             int idx = 1;
             for (const auto& cluster : clusters) {
-                {
-                    _transformationNumber = idx;
-                    _clusterNameSelection.clear();
-                    _clusterNameSelection = cluster.getName();
-                    _clusterIndices.clear();
-                    _clusterIndices = cluster.getIndices();
-                    _clusterIndicesMap.clear();
-                    for (int i = 0; i < _clusterIndices.size(); i++) {
-                        _clusterIndicesMap.insert({ _clusterIndices[i], i });
-                    }
-                    if (_clusterIndicesMap.empty()) {
-                        datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
-                        datasetTask.setFinished();
-                        return;
-                    }
-                    createDatasets();
-                    idx++;
-
+                _transformationNumber = idx;
+                _clusterNameSelection = cluster.getName();
+                _clusterIndices = cluster.getIndices();
+                _clusterIndicesMap.clear();
+                for (int i = 0; i < _clusterIndices.size(); i++) {
+                    _clusterIndicesMap.insert({ _clusterIndices[i], i });
                 }
+                if (_clusterIndicesMap.empty()) {
+                    datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
+                    datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
+                    datasetTask.setFinished();
+                    return;
+                }
+
+                datasetTask.setProgressDescription(
+                    QString("Processing cluster %1 of %2: %3")
+                    .arg(idx)
+                    .arg(totalClusters)
+                    .arg(_clusterNameSelection)
+                );
+
+                createDatasets();
+
+                ++processedClusters;
+                datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
+
+                ++idx;
             }
         }
     }
 
-
     qDebug() << "createDatasetsMultiInit: EXIT";
-    
 
     datasetTask.setProgress(1.0f);
     datasetTask.setFinished();
