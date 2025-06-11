@@ -41,13 +41,13 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
 
 void LayerSurferTransformationPlugin::transform()
 {
-    auto points = getInputDataset<Points>();
+    mv::Dataset<Points> points = getInputDataset<Points>();
 
     if (!points.isValid())
         return;
 
     // Get reference to dataset task for reporting progress
-    auto& datasetTask = points->getTask();
+    mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
     datasetTask.setRunning();
@@ -60,18 +60,30 @@ void LayerSurferTransformationPlugin::transform()
     }
     datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _clusterDatasetNameSelection, _clusterNameSelection));
     qDebug() << "Transforming dataset";
+
+    createDatasetsInit(points,datasetTask);
+
+
+}
+void LayerSurferTransformationPlugin::createDatasetsInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    // Timer for profiling function execution time
+    FunctionTimer timer(Q_FUNC_INFO);
+    qDebug() << "createDatasetsInit: ENTER";
     _clustersDataset = nullptr;
     _clusterIndicesMap.clear();
-    _clusterIndices.clear();    
+    _clusterIndices.clear();
+
+
     for (const mv::Dataset<Clusters>& child : points->getChildren()) {
         if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
             _clustersDataset = child;
             auto clusters = _clustersDataset->getClusters();
             for (const auto& cluster : clusters) {
                 if (cluster.getName() == _clusterNameSelection) {
-                   
+
                     _clusterIndices = cluster.getIndices();
-                    for (int i = 0; i < _clusterIndices.size();i++) {
+                    for (int i = 0; i < _clusterIndices.size(); i++) {
                         _clusterIndicesMap.insert({ _clusterIndices[i], i });
                     }
                     break;
@@ -89,11 +101,11 @@ void LayerSurferTransformationPlugin::transform()
         datasetTask.setFinished();
         return;
     }
-    createDataLatest();
+    qDebug() << "createDatasetsInit: EXIT";
+    createDatasets();
 
     datasetTask.setProgress(1.0f);
     datasetTask.setFinished();
-
 }
 
 void LayerSurferTransformationPlugin::setType(const QString& type)
@@ -223,7 +235,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     return pluginTriggerActions;
 }
 
-void LayerSurferTransformationPlugin::createDataLatest()
+void LayerSurferTransformationPlugin::createDatasets()
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
