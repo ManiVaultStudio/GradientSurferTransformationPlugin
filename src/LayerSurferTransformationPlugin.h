@@ -54,6 +54,8 @@ public:
 private:
     QString    _clusterDatasetNameSelection;
     QString     _clusterNameSelection;
+    QString     _transformationType;
+    int     _transformationNumber;
     Dataset<Clusters> _clustersDataset = nullptr;
     std::unordered_map<int, int> _clusterIndicesMap;
     std::vector<std::seed_seq::result_type> _clusterIndices;
