@@ -32,7 +32,9 @@ private:
 LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _clusterDatasetNameSelection(""),
-    _clusterNameSelection("")
+    _clusterNameSelection(""),
+    _transformationType(""),
+    _transformationNumber(-1)
 {
     
 }
@@ -99,7 +101,9 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
     //split type by "->"
     QStringList parts = type.split("->");
     _clusterDatasetNameSelection = parts.first().trimmed();
-    _clusterNameSelection = parts.last().trimmed();
+    QString temp = parts.last().trimmed();
+    _transformationNumber = temp.split(":").first().toInt();
+    _clusterNameSelection = temp.split(":").last().trimmed();
 }
 
 
@@ -151,14 +155,18 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             auto children = datasets.first()->getChildren();
             if (children.count() > 0) {
                 QVector<QPair<QString,QStringList>> optionTypes;
+                
                 for (const Dataset<Clusters>& child : children) {
                     if (child->getDataType() == ClusterType) {
                         auto clusters = child->getClusters();
                         QStringList options;
+                        int idx = 0;
                         for (const auto& cluster : clusters)
                         {
                             QString formatted = cluster.getName();
+                            formatted = QString::number(idx)+":"+formatted;
                             options.append(formatted);
+                            idx++;
                         }
                         QPair<QString, QStringList> optionvals;
                         optionvals.first = child->getGuiName();
@@ -240,7 +248,7 @@ void LayerSurferTransformationPlugin::createDataLatest()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = inputPointsDataset->getGuiName() + "/" + _clusterDatasetNameSelection + "/" + _clusterNameSelection;
+    QString newDatasetName = QString::number(_transformationNumber) +"." + inputPointsDataset->getGuiName() + "/" + _clusterDatasetNameSelection + "/" + _clusterNameSelection;
 
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);

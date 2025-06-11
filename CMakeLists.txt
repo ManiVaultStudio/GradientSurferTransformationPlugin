@@ -96,7 +96,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # Append plugin version to output file
 # 0 disables automatic folder placement (same as plugin type)
 # since we want to place all layerSurfer plugins in a separate folder
-mv_handle_plugin_config(${PROJECT_NAME} 0) 
+mv_handle_plugin_config(${PROJECT_NAME}) 
 
 # -----------------------------------------------------------------------------
 # Miscellaneous
