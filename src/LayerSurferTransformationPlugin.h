@@ -50,7 +50,8 @@ public:
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
-    void createDatasetsInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsSingleInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsMultInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 
 private:
     QString    _clusterDatasetNameSelection;
