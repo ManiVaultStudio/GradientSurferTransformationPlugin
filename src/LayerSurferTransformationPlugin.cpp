@@ -41,13 +41,13 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
 
 void LayerSurferTransformationPlugin::transform()
 {
-    auto points = getInputDataset<Points>();
+    mv::Dataset<Points> points = getInputDataset<Points>();
 
     if (!points.isValid())
         return;
 
     // Get reference to dataset task for reporting progress
-    auto& datasetTask = points->getTask();
+    mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
     datasetTask.setRunning();
@@ -60,40 +60,144 @@ void LayerSurferTransformationPlugin::transform()
     }
     datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _clusterDatasetNameSelection, _clusterNameSelection));
     qDebug() << "Transforming dataset";
+    if (_clusterNameSelection == "All")
+    {
+        createDatasetsMultInit(points, datasetTask);
+    }
+    else
+    {
+        createDatasetsSingleInit(points, datasetTask);
+    }
+    
+
+
+}
+void LayerSurferTransformationPlugin::createDatasetsMultInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    // Timer for profiling function execution time
+    FunctionTimer timer(Q_FUNC_INFO);
+    qDebug() << "createDatasetsMultiInit: ENTER";
     _clustersDataset = nullptr;
     _clusterIndicesMap.clear();
-    _clusterIndices.clear();    
+    _clusterIndices.clear();
+
+    bool foundClusters = false;
+    int totalClusters = 0;
+    int processedClusters = 0;
+
+    // First, count total clusters for progress calculation
+    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
+            auto clusters = child->getClusters();
+            totalClusters = static_cast<int>(clusters.size());
+            foundClusters = true;
+            break;
+        }
+    }
+
+    if (!foundClusters || totalClusters == 0) {
+        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
+            _clustersDataset = child;
+            auto clusters = _clustersDataset->getClusters();
+            int idx = 1;
+            for (const auto& cluster : clusters) {
+                _transformationNumber = idx;
+                _clusterNameSelection = cluster.getName();
+                _clusterIndices = cluster.getIndices();
+                _clusterIndicesMap.clear();
+                for (int i = 0; i < _clusterIndices.size(); i++) {
+                    _clusterIndicesMap.insert({ _clusterIndices[i], i });
+                }
+                if (_clusterIndicesMap.empty()) {
+                    datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
+                    datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
+                    datasetTask.setFinished();
+                    return;
+                }
+
+                datasetTask.setProgressDescription(
+                    QString("Processing cluster %1 of %2: %3")
+                    .arg(idx)
+                    .arg(totalClusters)
+                    .arg(_clusterNameSelection)
+                );
+
+                createDatasets();
+
+                ++processedClusters;
+                datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
+
+                ++idx;
+            }
+        }
+    }
+
+    qDebug() << "createDatasetsMultiInit: EXIT";
+
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
+
+void LayerSurferTransformationPlugin::createDatasetsSingleInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    // Timer for profiling function execution time
+    FunctionTimer timer(Q_FUNC_INFO);
+    qDebug() << "createDatasetsInit: ENTER";
+    _clustersDataset = nullptr;
+    _clusterIndicesMap.clear();
+    _clusterIndices.clear();
+
+    datasetTask.setProgress(0.0f);
+    datasetTask.setProgressDescription("Searching for selected cluster...");
+
+    bool foundCluster = false;
+
     for (const mv::Dataset<Clusters>& child : points->getChildren()) {
         if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
             _clustersDataset = child;
             auto clusters = _clustersDataset->getClusters();
             for (const auto& cluster : clusters) {
                 if (cluster.getName() == _clusterNameSelection) {
-                   
                     _clusterIndices = cluster.getIndices();
-                    for (int i = 0; i < _clusterIndices.size();i++) {
+                    for (int i = 0; i < _clusterIndices.size(); i++) {
                         _clusterIndicesMap.insert({ _clusterIndices[i], i });
                     }
+                    foundCluster = true;
                     break;
                 }
             }
         }
     }
+
     if (!_clustersDataset.isValid()) {
         datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
+        datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
     if (_clusterIndicesMap.empty()) {
         datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
+        datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
-    createDataLatest();
+
+    datasetTask.setProgress(0.5f);
+    datasetTask.setProgressDescription(QString("Processing cluster: %1").arg(_clusterNameSelection));
+
+    qDebug() << "createDatasetsInit: EXIT";
+    createDatasets();
 
     datasetTask.setProgress(1.0f);
+    datasetTask.setProgressDescription("Cluster processing complete.");
     datasetTask.setFinished();
-
 }
 
 void LayerSurferTransformationPlugin::setType(const QString& type)
@@ -160,7 +264,8 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                     if (child->getDataType() == ClusterType) {
                         auto clusters = child->getClusters();
                         QStringList options;
-                        int idx = 0;
+                        int idx = 1;
+                        options.append("0:All");
                         for (const auto& cluster : clusters)
                         {
                             QString formatted = cluster.getName();
@@ -223,7 +328,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     return pluginTriggerActions;
 }
 
-void LayerSurferTransformationPlugin::createDataLatest()
+void LayerSurferTransformationPlugin::createDatasets()
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
