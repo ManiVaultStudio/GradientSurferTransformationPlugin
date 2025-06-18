@@ -217,7 +217,8 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
 
 LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
 {
-    getPluginMetadata().setDescription("LayerSurfer transformation plugin");
+    setIconByName("barcode");
+	getPluginMetadata().setDescription("LayerSurfer transformation plugin");
     getPluginMetadata().setSummary("This layerSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
     getPluginMetadata().setCopyrightHolder({ "BioVault (Biomedical Visual Analytics Unit LUMC - TU Delft)" });
     getPluginMetadata().setAuthors({
