@@ -192,9 +192,7 @@ void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<
 
 void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
-
     FunctionTimer timer(Q_FUNC_INFO);
-    //qDebug() << "createDatasetsInit: ENTER";
     _pointsSplitDataset = nullptr;
     _splitIndicesMap.clear();
     _splitIndices.clear();
@@ -202,20 +200,20 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
     datasetTask.setProgress(0.0f);
     datasetTask.setProgressDescription("Searching for selected cluster...");
 
-    bool foundPointsSplitData = false;
+    bool foundDimension = false;
 
     for (const mv::Dataset<Points>& child : points->getChildren()) {
         if (child->getDataType() == PointType && child->getGuiName() == _datasetNameSelection) {
             _pointsSplitDataset = child;
             auto dimensions = _pointsSplitDataset->getDimensionNames();
-            for (int i = 0; i < dimensions.size();i++) {
-                
+            for (int i = 0; i < dimensions.size(); i++) {
                 if (dimensions.at(i) == _splitNameSelection) {
-                    std::vector<std::seed_seq::result_type>  partition1;
-                    std::vector<std::seed_seq::result_type>  partition2;
+                    foundDimension = true;
+                    std::vector<std::seed_seq::result_type> partition1;
+                    std::vector<std::seed_seq::result_type> partition2;
                     int numOfIndices = _pointsSplitDataset->getNumPoints();
                     std::vector<float> dimensionData(numOfIndices);
-                    _pointsSplitDataset->extractDataForDimension(dimensionData,i);
+                    _pointsSplitDataset->extractDataForDimension(dimensionData, i);
 
                     auto [minIt, maxIt] = std::minmax_element(dimensionData.begin(), dimensionData.end());
                     float minValue = (minIt != dimensionData.end()) ? *minIt : 0.0f;
@@ -225,35 +223,32 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
                     QString label = QString("Select transformation parameter (%1–%2):").arg(minValue).arg(maxValue);
                     float defaultValue = (minValue != maxValue) ? (minValue + maxValue) / 2.0f : minValue;
                     float sliderValue = static_cast<float>(QInputDialog::getDouble(
-                        nullptr, // parent widget, nullptr for modal
+                        nullptr,
                         "Transformation Parameter",
                         label,
-                        defaultValue,   // default value
-                        minValue,       // min value
-                        maxValue,       // max value
-                        2,              // decimals (number of decimal places)
+                        defaultValue,
+                        minValue,
+                        maxValue,
+                        2,
                         &ok,
                         Qt::WindowFlags(),
-                        0.01            // step
+                        0.01
                     ));
                     if (!ok) {
                         datasetTask.setProgressDescription("Transformation cancelled by user");
+                        datasetTask.setProgress(1.0f);
                         datasetTask.setFinished();
                         return;
                     }
 
-                    for (int temp=0;temp<dimensionData.size();temp++)
-                    {
-                        if (dimensionData.at(temp) > sliderValue)
-                        {
+                    for (int temp = 0; temp < dimensionData.size(); temp++) {
+                        if (dimensionData.at(temp) > sliderValue) {
                             partition1.push_back(temp);
                         }
-                        else
-                        {
+                        else {
                             partition2.push_back(temp);
                         }
                     }
-                    
 
                     // Process partition1 (greater than sliderValue)
                     if (!partition1.empty()) {
@@ -290,6 +285,20 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
         }
     }
 
+    if (!_pointsSplitDataset.isValid()) {
+        datasetTask.setProgressDescription(QString("No matching dataset found for %1").arg(_datasetNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    if (_pointsSplitDataset.isValid() && !foundDimension) {
+        datasetTask.setProgressDescription(QString("No matching dimension found for %1").arg(_splitNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
 }
 
 void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
