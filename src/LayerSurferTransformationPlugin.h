@@ -47,6 +47,9 @@ public:
     /** Performs the data transformation */
     void transform() override;
 
+    void transformCluster();
+    void transformPoint();
+
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();

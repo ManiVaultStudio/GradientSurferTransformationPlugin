@@ -28,7 +28,17 @@ private:
     QString _functionName;
     QElapsedTimer _timer;
 };
-
+/*inline bool isBinaryVector(const std::vector<float>& data, float epsilon = 1e-6f)
+{
+    const float* ptr = data.data();
+    const float* end = ptr + data.size();
+    for (; ptr != end; ++ptr) {
+        float v = *ptr;
+        if (!(std::abs(v - 0.0f) < epsilon || std::abs(v - 1.0f) < epsilon))
+            return false;
+    }
+    return true;
+}*/
 LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _clusterDatasetNameSelection(""),
@@ -40,6 +50,16 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
 }
 
 void LayerSurferTransformationPlugin::transform()
+{
+
+}
+
+void LayerSurferTransformationPlugin::transformPoint()
+
+{
+
+}
+void LayerSurferTransformationPlugin::transformCluster()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -259,30 +279,80 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
         if (numberOfDatasets == 1 && datasets.first()->getDataType() == PointType) {
             auto children = datasets.first()->getChildren();
             if (children.count() > 0) {
-                QVector<QPair<QString,QStringList>> optionTypes;
+                QVector<QPair<QString,QStringList>> clusterOptionTypes;
+                QVector<QPair<QString,QStringList>> pointOptionTypes;
                 
-                for (const Dataset<Clusters>& child : children) {
+                
+                for (const auto& child : children) {
                     if (child->getDataType() == ClusterType) {
-                        auto clusters = child->getClusters();
-                        QStringList options;
-                        int idx = 1;
-                        options.append("0:All");
-                        for (const auto& cluster : clusters)
+                        Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(child.getDatasetId());
+                        if (clusterDataset.isValid())
                         {
-                            QString formatted = cluster.getName();
-                            formatted = QString::number(idx)+":"+formatted;
-                            options.append(formatted);
-                            idx++;
+                            auto clusters = clusterDataset->getClusters();
+                            QStringList options;
+                            int idx = 1;
+                            options.append("0:All");
+                            for (const auto& cluster : clusters)
+                            {
+                                QString formatted = cluster.getName();
+                                formatted = QString::number(idx) + ":" + formatted;
+                                options.append(formatted);
+                                idx++;
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = clusterDataset->getGuiName();
+                            optionvals.second = options;
+                            clusterOptionTypes.append(optionvals);
                         }
-                        QPair<QString, QStringList> optionvals;
-                        optionvals.first = child->getGuiName();
-                        optionvals.second = options;
-                        optionTypes.append(optionvals);
+
                     }
+                    if (child->getDataType() == PointType)
+                    {
+                        Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
+                        if (pointDataset.isValid())
+                        {
+                            auto dimensionNames = pointDataset->getDimensionNames();
+                            QStringList options;
+                            for (int i = 0; i < dimensionNames.size(); i++)
+                            {
+                                options.append(dimensionNames.at(i));
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = pointDataset->getGuiName();
+                            optionvals.second = options;
+                            pointOptionTypes.append(optionvals);
+                        }
+
+                    }
+                    /*if (child->getDataType() == PointType)
+                    {
+                        Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
+                        if (pointDataset.isValid())
+                        {
+                            auto dimensionNames = pointDataset->getDimensionNames();
+                            int numofPoints = pointDataset->getNumPoints();
+                            //check if values for dimensions are binary
+                            QStringList options;
+                            for (int i = 0; i < dimensionNames.size(); i++)
+                            {
+                                std::vector<float> dimensionData(numofPoints);
+                                pointDataset->extractDataForDimension(dimensionData,i);
+                                //check if std::vector<float> dimensionData contains only binary values
+                                if (isBinaryVector(dimensionData)) {
+                                    options.append(dimensionNames.at(i));
+                                }
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = pointDataset->getGuiName();
+                            optionvals.second = options;
+                            pointOptionTypes.append(optionvals);
+                        }
+
+                    }*/
                 }
-                if (optionTypes.size() > 0)
+                if (clusterOptionTypes.size() > 0)
                 {
-                    for (const auto& optionType : optionTypes)
+                    for (const auto& optionType : clusterOptionTypes)
                     {
                         // optionType.first: main category
                         // optionType.second: QStringList of sub-options
@@ -293,7 +363,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                             QString subCopy = subOption;
                             firstCopy.replace("/", " ");
                             subCopy.replace("/", " ");
-                            const QString actionName = QString("LayerSurferTransform/%1/%2").arg(firstCopy, subCopy);
+                            const QString actionName = QString("LayerSurfer_Cluster_Split_Transform/%1/%2").arg(firstCopy, subCopy);
 
                             auto pluginTriggerAction = new mv::gui::PluginTriggerAction(
                                 const_cast<LayerSurferTransformationPluginFactory*>(this),
@@ -309,7 +379,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                                         // Use the setter instead of direct member access
                                         pluginInstance->setType(QString("%1->%2").arg(optionType.first, subOption));
                                         // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
-                                        pluginInstance->transform();
+                                        pluginInstance->transformCluster();
                                     }
                                 }
                             );
@@ -319,7 +389,42 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                     }
                 }
 
+                if (pointOptionTypes.size() > 0)
+                {
+                    for (const auto& optionType : pointOptionTypes)
+                    {
+                        for (int i = 0; i < optionType.second.size(); ++i)
+                        {
+                            const QString& subOption = optionType.second[i];
+                            QString firstCopy = optionType.first;
+                            QString subCopy = subOption;
+                            firstCopy.replace("/", " ");
+                            subCopy.replace("/", " ");
+                            const QString actionName = QString("LayerSurfer_Point_Split_Transform/%1/%2").arg(firstCopy, subCopy);
 
+                            auto pluginTriggerAction = new mv::gui::PluginTriggerAction(
+                                const_cast<LayerSurferTransformationPluginFactory*>(this),
+                                this,
+                                actionName,
+                                QString("Perform %1 (%2) data transformation").arg(optionType.first, subOption),
+                                icon(),
+                                // Explicitly capture optionType and subOption by value
+                                [this, datasets, optionType, subOption](mv::gui::PluginTriggerAction& pluginTriggerAction) -> void {
+                                    for (const auto& dataset : datasets) {
+                                        auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                                        pluginInstance->setInputDataset(dataset);
+                                        // Use the setter instead of direct member access
+                                        pluginInstance->setType(QString("%1->%2").arg(optionType.first, subOption));
+                                        // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
+                                        pluginInstance->transformPoint();
+                                    }
+                                }
+                            );
+
+                            pluginTriggerActions << pluginTriggerAction;
+                        }
+                    }
+                }
             }
 
 
