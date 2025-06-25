@@ -252,7 +252,7 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
 
                     // Process partition1 (greater than sliderValue)
                     if (!partition1.empty()) {
-                        _transformationNumber = 0;
+                        _transformationNumber = 1;
                         _splitNameSelection = QString("GreaterThan%1").arg(sliderValue);
                         _splitIndices = partition1;
                         _splitIndicesMap.clear();
@@ -267,7 +267,7 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
 
                     // Process partition2 (less than or equal to sliderValue)
                     if (!partition2.empty()) {
-                        _transformationNumber = 1;
+                        _transformationNumber = 0;
                         _splitNameSelection = QString("LessEqualThan%1").arg(sliderValue);
                         _splitIndices = partition2;
                         _splitIndicesMap.clear();
