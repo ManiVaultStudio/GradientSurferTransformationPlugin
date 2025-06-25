@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QtConcurrent>
 #include <cmath>
+#include<QInputDialog>
 
 Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 
@@ -28,11 +29,21 @@ private:
     QString _functionName;
     QElapsedTimer _timer;
 };
-
+/*inline bool isBinaryVector(const std::vector<float>& data, float epsilon = 1e-6f)
+{
+    const float* ptr = data.data();
+    const float* end = ptr + data.size();
+    for (; ptr != end; ++ptr) {
+        float v = *ptr;
+        if (!(std::abs(v - 0.0f) < epsilon || std::abs(v - 1.0f) < epsilon))
+            return false;
+    }
+    return true;
+}*/
 LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
-    _clusterDatasetNameSelection(""),
-    _clusterNameSelection(""),
+    _datasetNameSelection(""),
+    _splitNameSelection(""),
     _transformationType(""),
     _transformationNumber(-1)
 {
@@ -40,6 +51,40 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
 }
 
 void LayerSurferTransformationPlugin::transform()
+{
+
+}
+
+void LayerSurferTransformationPlugin::transformPoint()
+{
+    mv::Dataset<Points> points = getInputDataset<Points>();
+    if (!points.isValid())
+        return;
+
+    // Get reference to dataset task for reporting progress
+    mv::DatasetTask& datasetTask = points->getTask();
+
+
+    if (_datasetNameSelection.isEmpty() || _splitNameSelection.isEmpty())
+    {
+        datasetTask.setProgressDescription("No transformation selected");
+        datasetTask.setFinished();
+        return;
+    }
+
+    datasetTask.setName("Transforming");
+    datasetTask.setRunning();
+
+    datasetTask.setProgressDescription(
+        QString("Splitting %1 based on %2, dimension %3")
+        .arg(points->getGuiName(), _datasetNameSelection, _splitNameSelection)
+    );
+    createDatasetsPointSplit(points, datasetTask);
+
+    qDebug() << "Transforming dataset";
+
+}
+void LayerSurferTransformationPlugin::transformCluster()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -52,71 +97,71 @@ void LayerSurferTransformationPlugin::transform()
     datasetTask.setName("Transforming");
     datasetTask.setRunning();
  
-    if (_clusterDatasetNameSelection.isEmpty()|| _clusterNameSelection.isEmpty())
+    if (_datasetNameSelection.isEmpty()|| _splitNameSelection.isEmpty())
     {
         datasetTask.setProgressDescription("No transformation selected");
         datasetTask.setFinished();
         return;
     }
-    datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _clusterDatasetNameSelection, _clusterNameSelection));
+    datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _datasetNameSelection, _splitNameSelection));
     qDebug() << "Transforming dataset";
-    if (_clusterNameSelection == "All")
+    if (_splitNameSelection == "All")
     {
-        createDatasetsMultInit(points, datasetTask);
+        createDatasetsMultInitCluster(points, datasetTask);
     }
     else
     {
-        createDatasetsSingleInit(points, datasetTask);
+        createDatasetsSingleInitCluster(points, datasetTask);
     }
     
 
 
 }
-void LayerSurferTransformationPlugin::createDatasetsMultInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
     qDebug() << "createDatasetsMultiInit: ENTER";
-    _clustersDataset = nullptr;
-    _clusterIndicesMap.clear();
-    _clusterIndices.clear();
+    _clustersSplitDataset = nullptr;
+    _splitIndicesMap.clear();
+    _splitIndices.clear();
 
-    bool foundClusters = false;
+    bool foundClustersSplitDatas = false;
     int totalClusters = 0;
     int processedClusters = 0;
 
     // First, count total clusters for progress calculation
     for (const mv::Dataset<Clusters>& child : points->getChildren()) {
-        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _datasetNameSelection) {
             auto clusters = child->getClusters();
             totalClusters = static_cast<int>(clusters.size());
-            foundClusters = true;
+            foundClustersSplitDatas = true;
             break;
         }
     }
 
-    if (!foundClusters || totalClusters == 0) {
-        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
+    if (!foundClustersSplitDatas || totalClusters == 0) {
+        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_datasetNameSelection));
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
 
     for (const mv::Dataset<Clusters>& child : points->getChildren()) {
-        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
-            _clustersDataset = child;
-            auto clusters = _clustersDataset->getClusters();
+        if (child->getDataType() == ClusterType && child->getGuiName() == _datasetNameSelection) {
+            _clustersSplitDataset = child;
+            auto clusters = _clustersSplitDataset->getClusters();
             int idx = 1;
             for (const auto& cluster : clusters) {
                 _transformationNumber = idx;
-                _clusterNameSelection = cluster.getName();
-                _clusterIndices = cluster.getIndices();
-                _clusterIndicesMap.clear();
-                for (int i = 0; i < _clusterIndices.size(); i++) {
-                    _clusterIndicesMap.insert({ _clusterIndices[i], i });
+                _splitNameSelection = cluster.getName();
+                _splitIndices = cluster.getIndices();
+                _splitIndicesMap.clear();
+                for (int i = 0; i < _splitIndices.size(); i++) {
+                    _splitIndicesMap.insert({ _splitIndices[i], i });
                 }
-                if (_clusterIndicesMap.empty()) {
-                    datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
+                if (_splitIndicesMap.empty()) {
+                    datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_splitNameSelection));
                     datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
                     datasetTask.setFinished();
                     return;
@@ -126,7 +171,7 @@ void LayerSurferTransformationPlugin::createDatasetsMultInit(mv::Dataset<Points>
                     QString("Processing cluster %1 of %2: %3")
                     .arg(idx)
                     .arg(totalClusters)
-                    .arg(_clusterNameSelection)
+                    .arg(_splitNameSelection)
                 );
 
                 createDatasets();
@@ -145,52 +190,163 @@ void LayerSurferTransformationPlugin::createDatasetsMultInit(mv::Dataset<Points>
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsSingleInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
-    // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
-    qDebug() << "createDatasetsInit: ENTER";
-    _clustersDataset = nullptr;
-    _clusterIndicesMap.clear();
-    _clusterIndices.clear();
+    _pointsSplitDataset = nullptr;
+    _splitIndicesMap.clear();
+    _splitIndices.clear();
 
     datasetTask.setProgress(0.0f);
     datasetTask.setProgressDescription("Searching for selected cluster...");
 
-    bool foundCluster = false;
+    bool foundDimension = false;
 
-    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
-        if (child->getDataType() == ClusterType && child->getGuiName() == _clusterDatasetNameSelection) {
-            _clustersDataset = child;
-            auto clusters = _clustersDataset->getClusters();
-            for (const auto& cluster : clusters) {
-                if (cluster.getName() == _clusterNameSelection) {
-                    _clusterIndices = cluster.getIndices();
-                    for (int i = 0; i < _clusterIndices.size(); i++) {
-                        _clusterIndicesMap.insert({ _clusterIndices[i], i });
+    for (const mv::Dataset<Points>& child : points->getChildren()) {
+        if (child->getDataType() == PointType && child->getGuiName() == _datasetNameSelection) {
+            _pointsSplitDataset = child;
+            auto dimensions = _pointsSplitDataset->getDimensionNames();
+            for (int i = 0; i < dimensions.size(); i++) {
+                if (dimensions.at(i) == _splitNameSelection) {
+                    foundDimension = true;
+                    std::vector<std::seed_seq::result_type> partition1;
+                    std::vector<std::seed_seq::result_type> partition2;
+                    int numOfIndices = _pointsSplitDataset->getNumPoints();
+                    std::vector<float> dimensionData(numOfIndices);
+                    _pointsSplitDataset->extractDataForDimension(dimensionData, i);
+
+                    auto [minIt, maxIt] = std::minmax_element(dimensionData.begin(), dimensionData.end());
+                    float minValue = (minIt != dimensionData.end()) ? *minIt : 0.0f;
+                    float maxValue = (maxIt != dimensionData.end()) ? *maxIt : 0.0f;
+
+                    bool ok = false;
+                    QString label = QString("Select transformation parameter (%1–%2):").arg(minValue).arg(maxValue);
+                    float defaultValue = (minValue != maxValue) ? (minValue + maxValue) / 2.0f : minValue;
+                    float sliderValue = static_cast<float>(QInputDialog::getDouble(
+                        nullptr,
+                        "Transformation Parameter",
+                        label,
+                        defaultValue,
+                        minValue,
+                        maxValue,
+                        2,
+                        &ok,
+                        Qt::WindowFlags(),
+                        0.01
+                    ));
+                    if (!ok) {
+                        datasetTask.setProgressDescription("Transformation cancelled by user");
+                        datasetTask.setProgress(1.0f);
+                        datasetTask.setFinished();
+                        return;
                     }
-                    foundCluster = true;
+
+                    for (int temp = 0; temp < dimensionData.size(); temp++) {
+                        if (dimensionData.at(temp) > sliderValue) {
+                            partition1.push_back(temp);
+                        }
+                        else {
+                            partition2.push_back(temp);
+                        }
+                    }
+
+                    // Process partition1 (greater than sliderValue)
+                    if (!partition1.empty()) {
+                        _transformationNumber = 0;
+                        _splitNameSelection = QString("GreaterThan%1").arg(sliderValue);
+                        _splitIndices = partition1;
+                        _splitIndicesMap.clear();
+                        for (int j = 0; j < _splitIndices.size(); j++) {
+                            _splitIndicesMap.insert({ _splitIndices[j], j });
+                        }
+                        datasetTask.setProgressDescription(
+                            QString("Processing points > %1 in %2").arg(sliderValue).arg(dimensions.at(i))
+                        );
+                        createDatasets();
+                    }
+
+                    // Process partition2 (less than or equal to sliderValue)
+                    if (!partition2.empty()) {
+                        _transformationNumber = 1;
+                        _splitNameSelection = QString("LessEqualThan%1").arg(sliderValue);
+                        _splitIndices = partition2;
+                        _splitIndicesMap.clear();
+                        for (int j = 0; j < _splitIndices.size(); j++) {
+                            _splitIndicesMap.insert({ _splitIndices[j], j });
+                        }
+                        datasetTask.setProgressDescription(
+                            QString("Processing points <= %1 in %2").arg(sliderValue).arg(dimensions.at(i))
+                        );
+                        createDatasets();
+                    }
                     break;
                 }
             }
         }
     }
 
-    if (!_clustersDataset.isValid()) {
-        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_clusterDatasetNameSelection));
+    if (!_pointsSplitDataset.isValid()) {
+        datasetTask.setProgressDescription(QString("No matching dataset found for %1").arg(_datasetNameSelection));
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
-    if (_clusterIndicesMap.empty()) {
-        datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_clusterNameSelection));
+    if (_pointsSplitDataset.isValid() && !foundDimension) {
+        datasetTask.setProgressDescription(QString("No matching dimension found for %1").arg(_splitNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
+
+void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    // Timer for profiling function execution time
+    FunctionTimer timer(Q_FUNC_INFO);
+    qDebug() << "createDatasetsInit: ENTER";
+    _clustersSplitDataset = nullptr;
+    _splitIndicesMap.clear();
+    _splitIndices.clear();
+
+    datasetTask.setProgress(0.0f);
+    datasetTask.setProgressDescription("Searching for selected cluster...");
+
+    bool foundClustersSplitData = false;
+
+    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _datasetNameSelection) {
+            _clustersSplitDataset = child;
+            auto clusters = _clustersSplitDataset->getClusters();
+            for (const auto& cluster : clusters) {
+                if (cluster.getName() == _splitNameSelection) {
+                    _splitIndices = cluster.getIndices();
+                    for (int i = 0; i < _splitIndices.size(); i++) {
+                        _splitIndicesMap.insert({ _splitIndices[i], i });
+                    }
+                    foundClustersSplitData = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!_clustersSplitDataset.isValid()) {
+        datasetTask.setProgressDescription(QString("No clusters found for %1").arg(_datasetNameSelection));
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    if (_splitIndicesMap.empty()) {
+        datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_splitNameSelection));
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
 
     datasetTask.setProgress(0.5f);
-    datasetTask.setProgressDescription(QString("Processing cluster: %1").arg(_clusterNameSelection));
+    datasetTask.setProgressDescription(QString("Processing cluster: %1").arg(_splitNameSelection));
 
     qDebug() << "createDatasetsInit: EXIT";
     createDatasets();
@@ -204,10 +360,10 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
 {
     //split type by "->"
     QStringList parts = type.split("->");
-    _clusterDatasetNameSelection = parts.first().trimmed();
+    _datasetNameSelection = parts.first().trimmed();
     QString temp = parts.last().trimmed();
     _transformationNumber = temp.split(":").first().toInt();
-    _clusterNameSelection = temp.split(":").last().trimmed();
+    _splitNameSelection = temp.split(":").last().trimmed();
 }
 
 
@@ -217,7 +373,8 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
 
 LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
 {
-    getPluginMetadata().setDescription("LayerSurfer transformation plugin");
+    setIconByName("barcode");
+	getPluginMetadata().setDescription("LayerSurfer transformation plugin");
     getPluginMetadata().setSummary("This layerSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
     getPluginMetadata().setCopyrightHolder({ "BioVault (Biomedical Visual Analytics Unit LUMC - TU Delft)" });
     getPluginMetadata().setAuthors({
@@ -258,30 +415,80 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
         if (numberOfDatasets == 1 && datasets.first()->getDataType() == PointType) {
             auto children = datasets.first()->getChildren();
             if (children.count() > 0) {
-                QVector<QPair<QString,QStringList>> optionTypes;
+                QVector<QPair<QString,QStringList>> clusterOptionTypes;
+                QVector<QPair<QString,QStringList>> pointOptionTypes;
                 
-                for (const Dataset<Clusters>& child : children) {
+                
+                for (const auto& child : children) {
                     if (child->getDataType() == ClusterType) {
-                        auto clusters = child->getClusters();
-                        QStringList options;
-                        int idx = 1;
-                        options.append("0:All");
-                        for (const auto& cluster : clusters)
+                        Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(child.getDatasetId());
+                        if (clusterDataset.isValid())
                         {
-                            QString formatted = cluster.getName();
-                            formatted = QString::number(idx)+":"+formatted;
-                            options.append(formatted);
-                            idx++;
+                            auto clusters = clusterDataset->getClusters();
+                            QStringList options;
+                            int idx = 1;
+                            options.append("0:All");
+                            for (const auto& cluster : clusters)
+                            {
+                                QString formatted = cluster.getName();
+                                formatted = QString::number(idx) + ":" + formatted;
+                                options.append(formatted);
+                                idx++;
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = clusterDataset->getGuiName();
+                            optionvals.second = options;
+                            clusterOptionTypes.append(optionvals);
                         }
-                        QPair<QString, QStringList> optionvals;
-                        optionvals.first = child->getGuiName();
-                        optionvals.second = options;
-                        optionTypes.append(optionvals);
+
                     }
+                    if (child->getDataType() == PointType)
+                    {
+                        Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
+                        if (pointDataset.isValid())
+                        {
+                            auto dimensionNames = pointDataset->getDimensionNames();
+                            QStringList options;
+                            for (int i = 0; i < dimensionNames.size(); i++)
+                            {
+                                options.append(dimensionNames.at(i));
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = pointDataset->getGuiName();
+                            optionvals.second = options;
+                            pointOptionTypes.append(optionvals);
+                        }
+
+                    }
+                    /*if (child->getDataType() == PointType)
+                    {
+                        Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
+                        if (pointDataset.isValid())
+                        {
+                            auto dimensionNames = pointDataset->getDimensionNames();
+                            int numofPoints = pointDataset->getNumPoints();
+                            //check if values for dimensions are binary
+                            QStringList options;
+                            for (int i = 0; i < dimensionNames.size(); i++)
+                            {
+                                std::vector<float> dimensionData(numofPoints);
+                                pointDataset->extractDataForDimension(dimensionData,i);
+                                //check if std::vector<float> dimensionData contains only binary values
+                                if (isBinaryVector(dimensionData)) {
+                                    options.append(dimensionNames.at(i));
+                                }
+                            }
+                            QPair<QString, QStringList> optionvals;
+                            optionvals.first = pointDataset->getGuiName();
+                            optionvals.second = options;
+                            pointOptionTypes.append(optionvals);
+                        }
+
+                    }*/
                 }
-                if (optionTypes.size() > 0)
+                if (clusterOptionTypes.size() > 0)
                 {
-                    for (const auto& optionType : optionTypes)
+                    for (const auto& optionType : clusterOptionTypes)
                     {
                         // optionType.first: main category
                         // optionType.second: QStringList of sub-options
@@ -292,7 +499,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                             QString subCopy = subOption;
                             firstCopy.replace("/", " ");
                             subCopy.replace("/", " ");
-                            const QString actionName = QString("LayerSurferTransform/%1/%2").arg(firstCopy, subCopy);
+                            const QString actionName = QString("LayerSurfer_Cluster_Split_Transform/%1/%2").arg(firstCopy, subCopy);
 
                             auto pluginTriggerAction = new mv::gui::PluginTriggerAction(
                                 const_cast<LayerSurferTransformationPluginFactory*>(this),
@@ -308,7 +515,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                                         // Use the setter instead of direct member access
                                         pluginInstance->setType(QString("%1->%2").arg(optionType.first, subOption));
                                         // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
-                                        pluginInstance->transform();
+                                        pluginInstance->transformCluster();
                                     }
                                 }
                             );
@@ -318,7 +525,42 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                     }
                 }
 
+                if (pointOptionTypes.size() > 0)
+                {
+                    for (const auto& optionType : pointOptionTypes)
+                    {
+                        for (int i = 0; i < optionType.second.size(); ++i)
+                        {
+                            const QString& subOption = optionType.second[i];
+                            QString firstCopy = optionType.first;
+                            QString subCopy = subOption;
+                            firstCopy.replace("/", " ");
+                            subCopy.replace("/", " ");
+                            const QString actionName = QString("LayerSurfer_Point_Split_Transform/%1/%2").arg(firstCopy, subCopy);
 
+                            auto pluginTriggerAction = new mv::gui::PluginTriggerAction(
+                                const_cast<LayerSurferTransformationPluginFactory*>(this),
+                                this,
+                                actionName,
+                                QString("Perform %1 (%2) data transformation").arg(optionType.first, subOption),
+                                icon(),
+                                // Explicitly capture optionType and subOption by value
+                                [this, datasets, optionType, subOption](mv::gui::PluginTriggerAction& pluginTriggerAction) -> void {
+                                    for (const auto& dataset : datasets) {
+                                        auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                                        pluginInstance->setInputDataset(dataset);
+                                        // Use the setter instead of direct member access
+                                        pluginInstance->setType(QString("%1->%2").arg(optionType.first, subOption));
+                                        // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
+                                        pluginInstance->transformPoint();
+                                    }
+                                }
+                            );
+
+                            pluginTriggerActions << pluginTriggerAction;
+                        }
+                    }
+                }
             }
 
 
@@ -353,16 +595,16 @@ void LayerSurferTransformationPlugin::createDatasets()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = QString::number(_transformationNumber) +"." + inputPointsDataset->getGuiName() + "/" + _clusterDatasetNameSelection + "/" + _clusterNameSelection;
+    QString newDatasetName = QString::number(_transformationNumber) +"." + inputPointsDataset->getGuiName() + "/" + _datasetNameSelection + "/" + _splitNameSelection;
 
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
     events().notifyDatasetAdded(clusterPointsDataset);
 
     // Extract and set the data for the selected cluster indices
-    std::vector<float> clusterPointsData(_clusterIndices.size() * numDimensions);
-    inputPointsDataset->populateDataForDimensions(clusterPointsData, allDimensionIndices, _clusterIndices);
-    clusterPointsDataset->setData(clusterPointsData.data(), _clusterIndices.size(), numDimensions);
+    std::vector<float> clusterPointsData(_splitIndices.size() * numDimensions);
+    inputPointsDataset->populateDataForDimensions(clusterPointsData, allDimensionIndices, _splitIndices);
+    clusterPointsDataset->setData(clusterPointsData.data(), _splitIndices.size(), numDimensions);
     clusterPointsDataset->setDimensionNames(dimensionNames);
     datasetsToNotify.push_back(clusterPointsDataset);
 
@@ -398,9 +640,9 @@ void LayerSurferTransformationPlugin::createDatasets()
             std::vector<int> childDimensionIndices(childNumDimensions);
             std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
 
-            std::vector<float> childClusterData(_clusterIndices.size() * childNumDimensions);
-            fullChildPoints->populateDataForDimensions(childClusterData, childDimensionIndices, _clusterIndices);
-            childClusterPoints->setData(childClusterData.data(), _clusterIndices.size(), childNumDimensions);
+            std::vector<float> childClusterData(_splitIndices.size() * childNumDimensions);
+            fullChildPoints->populateDataForDimensions(childClusterData, childDimensionIndices, _splitIndices);
+            childClusterPoints->setData(childClusterData.data(), _splitIndices.size(), childNumDimensions);
             childClusterPoints->setDimensionNames(fullChildPoints->getDimensionNames());
             datasetsToNotify.push_back(childClusterPoints);
 
@@ -429,7 +671,7 @@ void LayerSurferTransformationPlugin::createDatasets()
                 const auto& originalIndices = cluster.getIndices();
                 for (int idx : originalIndices) {
                     // Only include indices that are present in the selected cluster
-                    if (auto it = _clusterIndicesMap.find(idx); it != _clusterIndicesMap.end()) {
+                    if (auto it = _splitIndicesMap.find(idx); it != _splitIndicesMap.end()) {
                         remappedIndices.push_back(it->second);
                     }
                 }
