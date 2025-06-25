@@ -53,17 +53,20 @@ public:
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
-    void createDatasetsSingleInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
-    void createDatasetsMultInit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 
 private:
-    QString    _clusterDatasetNameSelection;
-    QString     _clusterNameSelection;
+    QString    _datasetNameSelection;
+    QString     _splitNameSelection;
     QString     _transformationType;
-    int     _transformationNumber;
-    Dataset<Clusters> _clustersDataset = nullptr;
-    std::unordered_map<int, int> _clusterIndicesMap;
-    std::vector<std::seed_seq::result_type> _clusterIndices;
+    int         _transformationNumber;
+    Dataset<Clusters> _clustersSplitDataset = nullptr;
+    std::unordered_map<int, int> _splitIndicesMap;
+    std::vector<std::seed_seq::result_type> _splitIndices;
+    Dataset<Points>  _pointsSplitDataset = nullptr;
+
 };
 
 /**
