@@ -8,10 +8,15 @@
 #include <cmath>
 #include<QInputDialog>
 
+
 Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 
 using namespace mv;
 using namespace mv::util;
+
+
+
+
 
 class FunctionTimer {
 public:
@@ -219,67 +224,83 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
                     float minValue = (minIt != dimensionData.end()) ? *minIt : 0.0f;
                     float maxValue = (maxIt != dimensionData.end()) ? *maxIt : 0.0f;
 
-                    bool ok = false;
-                    QString label = QString("Select transformation parameter (%1–%2):").arg(minValue).arg(maxValue);
                     float defaultValue = (minValue != maxValue) ? (minValue + maxValue) / 2.0f : minValue;
-                    float sliderValue = static_cast<float>(QInputDialog::getDouble(
-                        nullptr,
-                        "Transformation Parameter",
-                        label,
-                        defaultValue,
-                        minValue,
-                        maxValue,
-                        2,
-                        &ok,
-                        Qt::WindowFlags(),
-                        0.01
-                    ));
-                    if (!ok) {
+                    TransformationParamDialog paramDialog(minValue, maxValue, defaultValue);
+                    if (paramDialog.exec() != QDialog::Accepted) {
                         datasetTask.setProgressDescription("Transformation cancelled by user");
                         datasetTask.setProgress(1.0f);
                         datasetTask.setFinished();
                         return;
                     }
+                    QString mode = paramDialog.selectedMode();
+                    bool extractByValue = (mode == "Extract by value");
+                    float sliderValue = static_cast<float>(paramDialog.selectedValue());
 
-                    for (int temp = 0; temp < dimensionData.size(); temp++) {
-                        if (dimensionData.at(temp) > sliderValue) {
-                            partition1.push_back(temp);
+                    if (extractByValue)
+                    {
+                        for (int temp = 0; temp < dimensionData.size(); temp++) {
+                            if (dimensionData.at(temp) == sliderValue) {
+                                partition1.push_back(temp);
+                            }
                         }
-                        else {
-                            partition2.push_back(temp);
+                        if (!partition1.empty()) {
+                            _transformationNumber = 1;
+                            _splitNameSelection = QString("EqualTo%1").arg(sliderValue);
+                            _splitIndices = partition1;
+                            _splitIndicesMap.clear();
+                            for (int j = 0; j < _splitIndices.size(); j++) {
+                                _splitIndicesMap.insert({ _splitIndices[j], j });
+                            }
+                            datasetTask.setProgressDescription(
+                                QString("Processing points == %1 in %2").arg(sliderValue).arg(dimensions.at(i)) 
+                            );
+                            createDatasets();
                         }
+                        break;
+                    }
+                    else
+                    {
+                        for (int temp = 0; temp < dimensionData.size(); temp++) {
+                            if (dimensionData.at(temp) > sliderValue) {
+                                partition1.push_back(temp);
+                            }
+                            else {
+                                partition2.push_back(temp);
+                            }
+                        }
+
+                        // Process partition1 (greater than sliderValue)
+                        if (!partition1.empty()) {
+                            _transformationNumber = 1;
+                            _splitNameSelection = QString("GreaterThan%1").arg(sliderValue);
+                            _splitIndices = partition1;
+                            _splitIndicesMap.clear();
+                            for (int j = 0; j < _splitIndices.size(); j++) {
+                                _splitIndicesMap.insert({ _splitIndices[j], j });
+                            }
+                            datasetTask.setProgressDescription(
+                                QString("Processing points > %1 in %2").arg(sliderValue).arg(dimensions.at(i))
+                            );
+                            createDatasets();
+                        }
+
+                        // Process partition2 (less than or equal to sliderValue)
+                        if (!partition2.empty()) {
+                            _transformationNumber = 0;
+                            _splitNameSelection = QString("LessEqualThan%1").arg(sliderValue);
+                            _splitIndices = partition2;
+                            _splitIndicesMap.clear();
+                            for (int j = 0; j < _splitIndices.size(); j++) {
+                                _splitIndicesMap.insert({ _splitIndices[j], j });
+                            }
+                            datasetTask.setProgressDescription(
+                                QString("Processing points <= %1 in %2").arg(sliderValue).arg(dimensions.at(i))
+                            );
+                            createDatasets();
+                        }
+                        break;
                     }
 
-                    // Process partition1 (greater than sliderValue)
-                    if (!partition1.empty()) {
-                        _transformationNumber = 1;
-                        _splitNameSelection = QString("GreaterThan%1").arg(sliderValue);
-                        _splitIndices = partition1;
-                        _splitIndicesMap.clear();
-                        for (int j = 0; j < _splitIndices.size(); j++) {
-                            _splitIndicesMap.insert({ _splitIndices[j], j });
-                        }
-                        datasetTask.setProgressDescription(
-                            QString("Processing points > %1 in %2").arg(sliderValue).arg(dimensions.at(i))
-                        );
-                        createDatasets();
-                    }
-
-                    // Process partition2 (less than or equal to sliderValue)
-                    if (!partition2.empty()) {
-                        _transformationNumber = 0;
-                        _splitNameSelection = QString("LessEqualThan%1").arg(sliderValue);
-                        _splitIndices = partition2;
-                        _splitIndicesMap.clear();
-                        for (int j = 0; j < _splitIndices.size(); j++) {
-                            _splitIndicesMap.insert({ _splitIndices[j], j });
-                        }
-                        datasetTask.setProgressDescription(
-                            QString("Processing points <= %1 in %2").arg(sliderValue).arg(dimensions.at(i))
-                        );
-                        createDatasets();
-                    }
-                    break;
                 }
             }
         }
