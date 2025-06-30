@@ -5,6 +5,12 @@
 #include <ClusterData/ClusterData.h>
 #include <QMap>
 #include <QString>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QLabel>
 
 /** All plugin related classes are in the ManiVault plugin namespace */
 using namespace mv::plugin;
@@ -26,6 +32,49 @@ using namespace mv::plugin;
  * 2. Chose the transformation option
  * 
  */
+
+ // Custom dialog for transformation parameters
+class TransformationParamDialog : public QDialog {
+    Q_OBJECT
+public:
+    TransformationParamDialog(float minValue, float maxValue, float defaultValue, QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Transformation Parameters");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        // Mode selection
+        layout->addWidget(new QLabel("Choose transformation mode:"));
+        modeCombo = new QComboBox(this);
+        modeCombo->addItem("Split by value");
+        modeCombo->addItem("Extract by value");
+        layout->addWidget(modeCombo);
+
+        // Value selection
+        QString label = QString("Select transformation parameter (%1–%2):").arg(minValue).arg(maxValue);
+        layout->addWidget(new QLabel(label));
+        valueSpin = new QDoubleSpinBox(this);
+        valueSpin->setRange(minValue, maxValue);
+        valueSpin->setDecimals(2);
+        valueSpin->setSingleStep(0.01);
+        valueSpin->setValue(defaultValue);
+        layout->addWidget(valueSpin);
+
+        // OK/Cancel buttons
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+
+    QString selectedMode() const { return modeCombo->currentText(); }
+    double selectedValue() const { return valueSpin->value(); }
+
+private:
+    QComboBox* modeCombo;
+    QDoubleSpinBox* valueSpin;
+};
+
 class LayerSurferTransformationPlugin : public TransformationPlugin
 {
 Q_OBJECT
