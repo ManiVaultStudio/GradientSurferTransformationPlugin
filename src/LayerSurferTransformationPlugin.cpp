@@ -650,8 +650,12 @@ void LayerSurferTransformationPlugin::createDatasets()
             }
 
             // Create a new Points dataset for the child, as a subset of the cluster
-            Dataset<Points> childClusterPoints = mv::data().createDataset(
+            /*Dataset<Points> childClusterPoints = mv::data().createDataset(
                 "Points",
+                clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
+                clusterPointsDataset
+            );*/
+            Dataset<Points> childClusterPoints = mv::data().createDerivedDataset(
                 clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
                 clusterPointsDataset
             );
