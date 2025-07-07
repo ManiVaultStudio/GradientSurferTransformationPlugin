@@ -11,6 +11,11 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QRadioButton>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QCheckBox>
+#include <QGroupBox>
 
 /** All plugin related classes are in the ManiVault plugin namespace */
 using namespace mv::plugin;
@@ -33,12 +38,16 @@ using namespace mv::plugin;
  * 
  */
 
- // Custom dialog for transformation parameters
+// Custom dialog for transformation parameters, styled like RemoveDimensionsDialog
 class TransformationParamDialog : public QDialog {
     Q_OBJECT
 public:
-    TransformationParamDialog(float minValue, float maxValue, float defaultValue, QWidget* parent = nullptr)
+    // Add exampleValues parameter
+    TransformationParamDialog(float minValue, float maxValue, float defaultValue, const QSet<float>& exampleValues, QWidget* parent = nullptr)
         : QDialog(parent)
+        , _minValue(minValue)
+        , _maxValue(maxValue)
+        , _defaultValue(defaultValue)
     {
         setWindowTitle("Transformation Parameters");
         QVBoxLayout* layout = new QVBoxLayout(this);
@@ -50,29 +59,250 @@ public:
         modeCombo->addItem("Extract by value");
         layout->addWidget(modeCombo);
 
-        // Value selection
-        QString label = QString("Select transformation parameter (%1–%2):").arg(minValue).arg(maxValue);
-        layout->addWidget(new QLabel(label));
-        valueSpin = new QDoubleSpinBox(this);
-        valueSpin->setRange(minValue, maxValue);
-        valueSpin->setDecimals(2);
-        valueSpin->setSingleStep(0.01);
-        valueSpin->setValue(defaultValue);
-        layout->addWidget(valueSpin);
+        // Search/filter box for value selection
+        layout->addWidget(new QLabel(QString("Search value (%1–%2):").arg(minValue).arg(maxValue)));
+        searchEdit = new QLineEdit(this);
+        layout->addWidget(searchEdit);
+
+        // Value selection list
+        valueList = new QListWidget(this);
+        valueList->setSelectionMode(QAbstractItemView::SingleSelection);
+
+        // Populate with example values, sorted
+        QList<float> sortedExamples = exampleValues.values();
+        std::sort(sortedExamples.begin(), sortedExamples.end());
+        for (float v : sortedExamples) {
+            valueList->addItem(QString::number(v, 'f', 2));
+        }
+        // fallback: if no example values, populate with range
+        if (valueList->count() == 0) {
+            for (float v = minValue; v <= maxValue + 1e-4; v += 0.01f) {
+                valueList->addItem(QString::number(v, 'f', 2));
+            }
+        }
+        // Select default value
+        for (int i = 0; i < valueList->count(); ++i) {
+            if (qFuzzyCompare(valueList->item(i)->text().toFloat(), defaultValue)) {
+                valueList->setCurrentRow(i);
+                break;
+            }
+        }
+        layout->addWidget(valueList);
+
+        // Deselect button
+        deselectButton = new QPushButton("Deselect", this);
+        layout->addWidget(deselectButton);
+        connect(deselectButton, &QPushButton::clicked, this, [this]() {
+            valueList->clearSelection();
+            updateInfoLabel();
+        });
+
+        // Info label for selection
+        infoLabel = new QLabel(this);
+        layout->addWidget(infoLabel);
+        updateInfoLabel();
 
         // OK/Cancel buttons
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
+
+        // Filter values as user types
+        connect(searchEdit, &QLineEdit::textChanged, this, [this, sortedExamples, minValue, maxValue](const QString& text) {
+            valueList->clear();
+            // Filter example values
+            for (float v : sortedExamples) {
+                QString valStr = QString::number(v, 'f', 2);
+                if (valStr.contains(text, Qt::CaseInsensitive))
+                    valueList->addItem(valStr);
+            }
+            // fallback: if no example values, filter range
+            if (valueList->count() == 0) {
+                for (float v = minValue; v <= maxValue + 1e-4; v += 0.01f) {
+                    QString valStr = QString::number(v, 'f', 2);
+                    if (valStr.contains(text, Qt::CaseInsensitive))
+                        valueList->addItem(valStr);
+                }
+            }
+            // Try to select the default value if present
+            for (int i = 0; i < valueList->count(); ++i) {
+                if (qFuzzyCompare(valueList->item(i)->text().toFloat(), _defaultValue)) {
+                    valueList->setCurrentRow(i);
+                    break;
+                }
+            }
+            updateInfoLabel();
+        });
+
+        // Update info label on selection change
+        connect(valueList->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
+            updateInfoLabel();
+        });
     }
 
     QString selectedMode() const { return modeCombo->currentText(); }
-    double selectedValue() const { return valueSpin->value(); }
+    double selectedValue() const {
+        auto items = valueList->selectedItems();
+        if (!items.isEmpty())
+            return items.first()->text().toDouble();
+        // fallback to default
+        return _defaultValue;
+    }
 
 private:
+    void updateInfoLabel() {
+        int selected = valueList->selectedItems().size();
+        int total = valueList->count();
+        infoLabel->setText(
+            QString("Selected: %1    Not selected: %2    Total: %3")
+                .arg(selected)
+                .arg(total - selected)
+                .arg(total)
+        );
+    }
+
     QComboBox* modeCombo;
-    QDoubleSpinBox* valueSpin;
+    QLineEdit* searchEdit;
+    QListWidget* valueList;
+    QPushButton* deselectButton;
+    QLabel* infoLabel;
+    float _minValue, _maxValue, _defaultValue;
+};
+
+// Custom dialog for removing dimensions with multi-select, search, and radio buttons
+class RemoveDimensionsDialog : public QDialog {
+    Q_OBJECT
+public:
+    RemoveDimensionsDialog(const QStringList& dimensions, QWidget* parent = nullptr)
+        : QDialog(parent)
+        , allDimensions(dimensions)
+    {
+        setWindowTitle("Remove/Keep Dimensions");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        // Search/filter box
+        layout->addWidget(new QLabel("Search dimensions:"));
+        searchEdit = new QLineEdit(this);
+        layout->addWidget(searchEdit);
+
+        // Multi-selection list widget
+        layout->addWidget(new QLabel("Select dimensions:"));
+        dimensionList = new QListWidget(this);
+        dimensionList->addItems(dimensions);
+        dimensionList->setSelectionMode(QAbstractItemView::MultiSelection);
+        layout->addWidget(dimensionList);
+
+        // Select All / Deselect All buttons
+        QHBoxLayout* selectButtonsLayout = new QHBoxLayout();
+        selectAllButton = new QPushButton("Select All", this);
+        deselectAllButton = new QPushButton("Deselect All", this);
+        selectButtonsLayout->addWidget(selectAllButton);
+        selectButtonsLayout->addWidget(deselectAllButton);
+        layout->addLayout(selectButtonsLayout);
+
+        connect(selectAllButton, &QPushButton::clicked, this, [this]() {
+            for (int i = 0; i < dimensionList->count(); ++i)
+                dimensionList->item(i)->setSelected(true);
+            updateInfoLabel();
+        });
+        connect(deselectAllButton, &QPushButton::clicked, this, [this]() {
+            dimensionList->clearSelection();
+            updateInfoLabel();
+        });
+
+        // Info label for selection counts
+        infoLabel = new QLabel(this);
+        layout->addWidget(infoLabel);
+        updateInfoLabel();
+
+        // Radio buttons for keep/remove
+        QGroupBox* radioGroup = new QGroupBox("Action", this);
+        QHBoxLayout* radioLayout = new QHBoxLayout(radioGroup);
+        keepRadio = new QRadioButton("Keep selected", this);
+        removeRadio = new QRadioButton("Remove selected", this);
+        removeRadio->setChecked(true);
+        radioLayout->addWidget(keepRadio);
+        radioLayout->addWidget(removeRadio);
+        layout->addWidget(radioGroup);
+
+        // Inplace/New radio buttons
+        QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
+        QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
+        inplaceRadio = new QRadioButton("Inplace", this);
+        newRadio = new QRadioButton("New", this);
+        newRadio->setChecked(true);
+        inplaceLayout->addWidget(inplaceRadio);
+        inplaceLayout->addWidget(newRadio);
+        layout->addWidget(inplaceGroup);
+
+        // OK/Cancel buttons
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+
+        // Filter dimensions as user types
+        connect(searchEdit, &QLineEdit::textChanged, this, [this, dimensions](const QString& text) {
+            dimensionList->clear();
+            for (const QString& dim : dimensions) {
+                if (dim.contains(text, Qt::CaseInsensitive))
+                    dimensionList->addItem(dim);
+            }
+            // Restore selection if possible
+            for (int i = 0; i < dimensionList->count(); ++i) {
+                QListWidgetItem* item = dimensionList->item(i);
+                if (selectedDimsSet.contains(item->text()))
+                    item->setSelected(true);
+            }
+            updateInfoLabel();
+        });
+
+        // Update info label on selection change
+        connect(dimensionList->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
+            // Track selected items for restoring after filtering
+            selectedDimsSet.clear();
+            for (QListWidgetItem* item : dimensionList->selectedItems())
+                selectedDimsSet.insert(item->text());
+            updateInfoLabel();
+        });
+    }
+
+    QStringList selectedDimensions() const {
+        QStringList dims;
+        for (QListWidgetItem* item : dimensionList->selectedItems())
+            dims << item->text();
+        return dims;
+    }
+    bool keepSelected() const { return keepRadio->isChecked(); }
+    bool removeSelected() const { return removeRadio->isChecked(); }
+    bool isInplace() const { return inplaceRadio->isChecked(); }
+    bool isNew() const { return newRadio->isChecked(); }
+
+private:
+    void updateInfoLabel() {
+        int selected = dimensionList->selectedItems().size();
+        int total = 0;
+        // Count visible items for not selected
+        for (int i = 0; i < dimensionList->count(); ++i)
+            ++total;
+        int notSelected = total - selected;
+        infoLabel->setText(
+            QString("Selected: %1    Not selected: %2").arg(selected).arg(notSelected)
+        );
+    }
+
+    QLineEdit* searchEdit;
+    QListWidget* dimensionList;
+    QRadioButton* keepRadio;
+    QRadioButton* removeRadio;
+    QLabel* infoLabel;
+    QStringList allDimensions;
+    QSet<QString> selectedDimsSet;
+    QPushButton* selectAllButton;
+    QPushButton* deselectAllButton;
+    QRadioButton* inplaceRadio;
+    QRadioButton* newRadio;
 };
 
 class LayerSurferTransformationPlugin : public TransformationPlugin
@@ -98,6 +328,8 @@ public:
 
     void transformCluster();
     void transformPoint();
+    void transformRowNormalize();
+    void transformDimensionRemove();
 
     // Only declare the setter, do not define it here
     void setType(const QString& type);
@@ -105,6 +337,8 @@ public:
     void createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 
 private:
     QString    _datasetNameSelection;
