@@ -401,9 +401,138 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
 
 void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
+    // Step 1: Get dimension names
+    QStringList dimensionNames;
+    {
+        auto dims = points->getDimensionNames();
+        for (const auto& d : dims)
+            dimensionNames << d;
+    }
 
+    // Step 2: Show dialog (no dimension selection, always all)
+    NormalizeRowsDialog dialog(dimensionNames);
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Normalization cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
 
+    // Step 3: Get user selection
+    QString method = dialog.selectedMethod();
+    bool inplace = dialog.isInplace();
+    QString dtype = dialog.selectedDataType();
 
+    // Step 4: Always normalize all values (global normalization)
+    int numPoints = points->getNumPoints();
+    int numDims = points->getNumDimensions();
+    if (numPoints == 0 || numDims == 0) {
+        datasetTask.setProgressDescription("No data to normalize");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Step 5: Prepare output data
+    std::vector<float> data(numPoints * numDims);
+    std::vector<int> dimensionIndices;
+    for (int i = 0; i < numDims; i++)
+        dimensionIndices.push_back(i);
+    points->populateDataForDimensions(data, dimensionIndices);
+
+    // Step 6: Compute statistics for global normalization
+    float norm = 1.0f, mean = 0.0f, stddev = 1.0f, minVal = 0.0f, maxVal = 1.0f, maxAbs = 1.0f, scale = 1.0f;
+    if (method.startsWith("L2")) {
+        // L2 norm of the whole data vector
+        norm = std::sqrt(std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + b * b; }));
+        if (norm < 1e-8f) norm = 1.0f;
+    }
+    else if (method.startsWith("L1")) {
+        norm = std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + std::abs(b); });
+        if (norm < 1e-8f) norm = 1.0f;
+    }
+    else if (method.startsWith("Max")) {
+        norm = 0.0f;
+        for (float v : data) norm = std::max(norm, std::abs(v));
+        if (norm < 1e-8f) norm = 1.0f;
+    }
+    else if (method.startsWith("Z-Score")) {
+        // mean and stddev of all values
+        double sum = 0.0, sqsum = 0.0;
+        for (float v : data) { sum += v; sqsum += v * v; }
+        mean = static_cast<float>(sum / data.size());
+        stddev = static_cast<float>(std::sqrt(sqsum / data.size() - mean * mean));
+        if (stddev < 1e-8f) stddev = 1.0f;
+    }
+    else if (method.startsWith("Min-Max")) {
+        auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
+        minVal = (minIt != data.end()) ? *minIt : 0.0f;
+        maxVal = (maxIt != data.end()) ? *maxIt : 1.0f;
+        if (std::abs(maxVal - minVal) < 1e-8f) { minVal = 0.0f; maxVal = 1.0f; }
+    }
+    else if (method.startsWith("Decimal Scaling")) {
+        // Find max absolute value, then scale by 10^j where j = ceil(log10(maxAbs))
+        maxAbs = 0.0f;
+        for (float v : data) maxAbs = std::max(maxAbs, std::abs(v));
+        if (maxAbs < 1e-8f) maxAbs = 1.0f;
+        scale = std::pow(10.0f, std::ceil(std::log10(maxAbs)));
+        if (scale < 1e-8f) scale = 1.0f;
+    }
+
+    // Step 7: Apply normalization to all values
+    for (float& v : data) {
+        if (method.startsWith("L2") || method.startsWith("L1") || method.startsWith("Max")) {
+            v = v / norm;
+        }
+        else if (method.startsWith("Z-Score")) {
+            v = (v - mean) / stddev;
+        }
+        else if (method.startsWith("Min-Max")) {
+            v = (v - minVal) / (maxVal - minVal);
+        }
+        else if (method.startsWith("Decimal Scaling")) {
+            v = v / scale;
+        }
+    }
+
+    // Step 8: Output
+    if (dtype == "bfloat16") {
+        std::vector<__bfloat16> outData(data.size());
+        for (size_t i = 0; i < data.size(); ++i)
+            outData[i] = static_cast<__bfloat16>(data[i]);
+        if (!inplace) {
+            QString newName = points->getGuiName() + "/normalized";
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(outData.data(), numPoints, numDims);
+            newPoints->setDimensionNames(points->getDimensionNames());
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(outData.data(), numPoints, numDims);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
+    }
+    else {
+        if (!inplace) {
+            QString newName = points->getGuiName() + "/normalized";
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(data.data(), numPoints, numDims);
+            newPoints->setDimensionNames(points->getDimensionNames());
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(data.data(), numPoints, numDims);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
+    }
+
+    datasetTask.setProgressDescription("Normalization complete");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
 }
 
 

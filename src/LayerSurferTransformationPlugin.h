@@ -326,6 +326,72 @@ private:
     QRadioButton* floatRadio;
 };
 
+// --- Update NormalizeRowsDialog: add Z-Score, Min-Max, Decimal Scaling ---
+class NormalizeRowsDialog : public QDialog {
+    Q_OBJECT
+public:
+    NormalizeRowsDialog(const QStringList& /*dimensions*/, QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Normalize Data");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        // Info label: normalization is for all values, based on the full dataset
+        layout->addWidget(new QLabel("All values will be normalized using the selected method, based on the full dataset."));
+
+        // Normalization method
+        layout->addWidget(new QLabel("Normalization method:"));
+        methodCombo = new QComboBox(this);
+        methodCombo->addItem("L2 (Euclidean)");
+        methodCombo->addItem("L1 (Manhattan)");
+        methodCombo->addItem("Max");
+        methodCombo->addItem("Z-Score");
+        methodCombo->addItem("Min-Max");
+        methodCombo->addItem("Decimal Scaling");
+        layout->addWidget(methodCombo);
+
+        // Output mode
+        QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
+        QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
+        inplaceRadio = new QRadioButton("Inplace", this);
+        newRadio = new QRadioButton("New", this);
+        newRadio->setChecked(true);
+        inplaceLayout->addWidget(inplaceRadio);
+        inplaceLayout->addWidget(newRadio);
+        layout->addWidget(inplaceGroup);
+
+        // Data type
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true);
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        layout->addWidget(dtypeGroup);
+
+        // OK/Cancel
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+
+    QString selectedMethod() const { return methodCombo->currentText(); }
+    bool isInplace() const { return inplaceRadio->isChecked(); }
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+
+private:
+    QComboBox* methodCombo;
+    QRadioButton* inplaceRadio;
+    QRadioButton* newRadio;
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
+};
+
 class LayerSurferTransformationPlugin : public TransformationPlugin
 {
 Q_OBJECT
