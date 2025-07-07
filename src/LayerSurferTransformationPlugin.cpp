@@ -7,7 +7,7 @@
 #include <QtConcurrent>
 #include <cmath>
 #include<QInputDialog>
-
+#include <QApplication>
 
 Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 
@@ -52,7 +52,7 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
     _transformationType(""),
     _transformationNumber(-1)
 {
-    
+    qApp->setStyleSheet("QToolTip { color: black; background: #ffffe1; border: 1px solid black; }");
 }
 
 void LayerSurferTransformationPlugin::transform()
