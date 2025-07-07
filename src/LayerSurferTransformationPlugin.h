@@ -205,11 +205,11 @@ public:
             for (int i = 0; i < dimensionList->count(); ++i)
                 dimensionList->item(i)->setSelected(true);
             updateInfoLabel();
-        });
+            });
         connect(deselectAllButton, &QPushButton::clicked, this, [this]() {
             dimensionList->clearSelection();
             updateInfoLabel();
-        });
+            });
 
         // Info label for selection counts
         infoLabel = new QLabel(this);
@@ -236,6 +236,16 @@ public:
         inplaceLayout->addWidget(newRadio);
         layout->addWidget(inplaceGroup);
 
+        // --- Data type radio buttons ---
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true); // Default selection
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        layout->addWidget(dtypeGroup);
+
         // OK/Cancel buttons
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -256,7 +266,7 @@ public:
                     item->setSelected(true);
             }
             updateInfoLabel();
-        });
+            });
 
         // Update info label on selection change
         connect(dimensionList->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
@@ -265,7 +275,7 @@ public:
             for (QListWidgetItem* item : dimensionList->selectedItems())
                 selectedDimsSet.insert(item->text());
             updateInfoLabel();
-        });
+            });
     }
 
     QStringList selectedDimensions() const {
@@ -278,6 +288,13 @@ public:
     bool removeSelected() const { return removeRadio->isChecked(); }
     bool isInplace() const { return inplaceRadio->isChecked(); }
     bool isNew() const { return newRadio->isChecked(); }
+
+    // Returns the selected data type as a string: "bfloat16", "float"
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        if (floatRadio->isChecked()) return "float";
+        return "float"; // fallback
+    }
 
 private:
     void updateInfoLabel() {
@@ -303,6 +320,10 @@ private:
     QPushButton* deselectAllButton;
     QRadioButton* inplaceRadio;
     QRadioButton* newRadio;
+
+    // Data type radio buttons
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
 };
 
 class LayerSurferTransformationPlugin : public TransformationPlugin

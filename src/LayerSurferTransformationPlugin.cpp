@@ -454,27 +454,53 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
     // Step 5: Create new dataset with selected dimensions
     int numPoints = points->getNumPoints();
     int numDims = indicesToKeep.size();
-    std::vector<__bfloat16> newData(numPoints * numDims);
-    points->populateDataForDimensions(newData, indicesToKeep);
+
     std::vector<QString> newDimNames;
     for (int idx : indicesToKeep)
-    {
         newDimNames.push_back(dimensionNames[idx]);
-    }
-    if (!dialog.isInplace()) {
-        QString newName = points->getGuiName() + (keepSelected ? "/kept_dims" : "/removed_dims");
-        Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
-        newPoints->setData(newData.data(), numPoints, numDims);
-        newPoints->setDimensionNames(newDimNames);
-        mv::events().notifyDatasetAdded(newPoints);
-        mv::events().notifyDatasetDataChanged(newPoints);
-    }
-    else
+
+    QString selectedType = dialog.selectedDataType();
+
+    if (selectedType == "bfloat16")
     {
-        points->setData(newData.data(), numPoints, numDims);
-        points->setDimensionNames(newDimNames);
-        mv::events().notifyDatasetAdded(points);
-        mv::events().notifyDatasetDataChanged(points);
+        std::vector<__bfloat16> newData(numPoints * numDims);
+        points->populateDataForDimensions(newData, indicesToKeep);
+
+        if (!dialog.isInplace()) {
+            QString newName = points->getGuiName() + (keepSelected ? "/kept_dims" : "/removed_dims");
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(newData.data(), numPoints, numDims);
+            newPoints->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(newData.data(), numPoints, numDims);
+            points->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
+    }
+
+    else // default: float
+    {
+        std::vector<float> newData(numPoints * numDims);
+        points->populateDataForDimensions(newData, indicesToKeep);
+
+        if (!dialog.isInplace()) {
+            QString newName = points->getGuiName() + (keepSelected ? "/kept_dims" : "/removed_dims");
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(newData.data(), numPoints, numDims);
+            newPoints->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(newData.data(), numPoints, numDims);
+            points->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
     }
 
     datasetTask.setProgressDescription("Dimension removal complete");
