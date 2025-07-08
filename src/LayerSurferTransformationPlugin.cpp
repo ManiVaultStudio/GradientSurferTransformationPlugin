@@ -592,7 +592,7 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
 
     if (selectedType == "bfloat16")
     {
-        std::vector<__bfloat16> newData(numPoints * numDims);
+        std::vector<biovault::bfloat16_t> newData(numPoints * numDims);
         points->populateDataForDimensions(newData, indicesToKeep);
 
         if (!dialog.isInplace()) {
