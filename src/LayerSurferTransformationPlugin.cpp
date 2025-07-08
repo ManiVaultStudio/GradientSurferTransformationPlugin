@@ -497,9 +497,9 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
 
     // Step 8: Output
     if (dtype == "bfloat16") {
-        std::vector<__bfloat16> outData(data.size());
+        std::vector<biovault::bfloat16_t> outData(data.size());
         for (size_t i = 0; i < data.size(); ++i)
-            outData[i] = static_cast<__bfloat16>(data[i]);
+            outData[i] = static_cast<biovault::bfloat16_t>(data[i]);
         if (!inplace) {
             QString newName = points->getGuiName() + "/normalized";
             Dataset<Points> newPoints = mv::data().createDataset("Points", newName);

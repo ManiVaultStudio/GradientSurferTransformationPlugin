@@ -17,9 +17,9 @@ class LayerSurferTransformationPluginConan(ConanFile):
     """
 
     name = "LayerSurferTransformationPlugin"
-    description = """Plugins for displaying LayerSurferTransformation in ManiVaultStudio."""
+    description = """Plugins for displaying LayerSurferTransformationPlugin in ManiVaultStudio."""
     topics = ("hdps", "plugin", "image data", "loading")
-    url = "https://github.com/ManiVaultStudio/LayerSurferTransformation"
+    url = "https://github.com/ManiVaultStudio/LayerSurferTransformationPlugin"
     author = "B. van Lew b.van_lew@lumc.nl"  # conan recipe author
     license = "MIT"
 
@@ -35,7 +35,7 @@ class LayerSurferTransformationPluginConan(ConanFile):
 
     scm = {
         "type": "git",
-        "subfolder": "hdps/LayerSurferTransformation",
+        "subfolder": "hdps/LayerSurferTransformationPlugin",
         "url": "auto",
         "revision": "auto",
     }
@@ -108,7 +108,7 @@ class LayerSurferTransformationPluginConan(ConanFile):
 
     def _configure_cmake(self):
         cmake = CMake(self)
-        cmake.configure(build_script_folder="hdps/LayerSurferTransformation")
+        cmake.configure(build_script_folder="hdps/LayerSurferTransformationPlugin")
         cmake.verbose = True
         return cmake
 
