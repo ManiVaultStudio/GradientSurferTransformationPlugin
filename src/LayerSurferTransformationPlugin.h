@@ -358,6 +358,7 @@ public:
         newRadio->setChecked(true);
         inplaceLayout->addWidget(inplaceRadio);
         inplaceLayout->addWidget(newRadio);
+        inplaceGroup->setLayout(inplaceLayout); // FIX: Set layout for group box
         layout->addWidget(inplaceGroup);
 
         // Data type
@@ -368,6 +369,7 @@ public:
         floatRadio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
+        dtypeGroup->setLayout(dtypeLayout); // FIX: Set layout for group box
         layout->addWidget(dtypeGroup);
 
         // OK/Cancel
@@ -391,6 +393,57 @@ private:
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
 };
+
+class RemoveZeroColumnsDialog : public QDialog {
+    Q_OBJECT
+public:
+    RemoveZeroColumnsDialog(QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Remove Zero Columns");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        // Info label
+        layout->addWidget(new QLabel("This will remove all columns that contain only zero values."));
+        // Output mode
+        QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
+        QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
+        inplaceRadio = new QRadioButton("Inplace", this);
+        newRadio = new QRadioButton("New", this);
+        newRadio->setChecked(true);
+        inplaceLayout->addWidget(inplaceRadio);
+        inplaceLayout->addWidget(newRadio);
+        inplaceGroup->setLayout(inplaceLayout); // FIX: Set layout for group box
+        layout->addWidget(inplaceGroup);
+        // Data type
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true);
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        dtypeGroup->setLayout(dtypeLayout); // FIX: Set layout for group box
+        layout->addWidget(dtypeGroup);
+        // OK/Cancel
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+    bool isInplace() const { return inplaceRadio->isChecked(); }
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+
+private:
+    QRadioButton* inplaceRadio;
+    QRadioButton* newRadio;
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
+};
+
+
 
 class LayerSurferTransformationPlugin : public TransformationPlugin
 {
@@ -417,7 +470,7 @@ public:
     void transformPoint();
     void transformRowNormalize();
     void transformDimensionRemove();
-
+    void transformRemoveZeroColumns();
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
@@ -426,7 +479,7 @@ public:
     void createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
-
+    void removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;
