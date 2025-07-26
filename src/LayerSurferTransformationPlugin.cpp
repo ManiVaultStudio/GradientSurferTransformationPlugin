@@ -1,5 +1,6 @@
 #include "LayerSurferTransformationPlugin.h"
 #include "LayerSurferTransformationDialogs.h"
+#include "LayerSurferTransformationUtils.h"
 
 #include <QDebug>
 #include <QtCore>
@@ -15,37 +16,6 @@ Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 using namespace mv;
 using namespace mv::util;
 
-
-
-
-
-class FunctionTimer {
-public:
-    FunctionTimer(const QString& functionName)
-        : _functionName(functionName)
-    {
-        _timer.start();
-    }
-    ~FunctionTimer()
-    {
-        qDebug() << _functionName << "took"
-            << _timer.elapsed() / 1000.0 << "seconds";
-    }
-private:
-    QString _functionName;
-    QElapsedTimer _timer;
-};
-/*inline bool isBinaryVector(const std::vector<float>& data, float epsilon = 1e-6f)
-{
-    const float* ptr = data.data();
-    const float* end = ptr + data.size();
-    for (; ptr != end; ++ptr) {
-        float v = *ptr;
-        if (!(std::abs(v - 0.0f) < epsilon || std::abs(v - 1.0f) < epsilon))
-            return false;
-    }
-    return true;
-}*/
 LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _datasetNameSelection(""),
