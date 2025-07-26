@@ -1,5 +1,5 @@
 #include "LayerSurferTransformationPlugin.h"
-
+#include "LayerSurferTransformationDialogs.h"
 
 #include <QDebug>
 #include <QtCore>
@@ -8,6 +8,7 @@
 #include <cmath>
 #include<QInputDialog>
 #include <QApplication>
+
 
 Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 
