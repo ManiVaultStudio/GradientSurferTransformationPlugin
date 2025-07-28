@@ -5,6 +5,17 @@
 #include <ClusterData/ClusterData.h>
 #include <QMap>
 #include <QString>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QLabel>
+#include <QRadioButton>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QCheckBox>
+#include <QGroupBox>
 
 /** All plugin related classes are in the ManiVault plugin namespace */
 using namespace mv::plugin;
@@ -26,6 +37,7 @@ using namespace mv::plugin;
  * 2. Chose the transformation option
  * 
  */
+
 class LayerSurferTransformationPlugin : public TransformationPlugin
 {
 Q_OBJECT
@@ -49,14 +61,18 @@ public:
 
     void transformCluster();
     void transformPoint();
-
+    void transformRowNormalize();
+    void transformDimensionRemove();
+    void transformRemoveZeroColumns();
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
     void createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
-
+    void normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;

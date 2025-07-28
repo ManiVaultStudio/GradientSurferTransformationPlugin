@@ -36,6 +36,9 @@ find_package(ManiVault COMPONENTS Core PointData ClusterData CONFIG QUIET)
 set(PLUGIN_SOURCES
     src/LayerSurferTransformationPlugin.h
     src/LayerSurferTransformationPlugin.cpp
+    src/LayerSurferTransformationDialogs.h
+    src/LayerSurferTransformationUtils.h
+    src/LayerSurferTransformationUtils.cpp
     PluginInfo.json
 )
 
