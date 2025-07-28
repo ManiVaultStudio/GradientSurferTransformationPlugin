@@ -419,3 +419,93 @@ private:
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
 };
+
+
+class ExtractByClusterSubstringDialog : public QDialog {
+    Q_OBJECT
+public:
+    ExtractByClusterSubstringDialog(QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Extract by Cluster Substring");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        layout->addWidget(new QLabel("This will extract data based on cluster substring values."));
+
+        // Input for new substring
+        QHBoxLayout* inputLayout = new QHBoxLayout();
+        substringEdit = new QLineEdit(this);
+        QPushButton* addButton = new QPushButton("Add", this);
+        inputLayout->addWidget(new QLabel("Enter cluster substring:"));
+        inputLayout->addWidget(substringEdit);
+        inputLayout->addWidget(addButton);
+        layout->addLayout(inputLayout);
+
+        // List of entered substrings
+        substringList = new QListWidget(this);
+        substringList->setSelectionMode(QAbstractItemView::SingleSelection);
+        layout->addWidget(substringList);
+
+        // Remove button
+        QPushButton* removeButton = new QPushButton("Remove Selected", this);
+        layout->addWidget(removeButton);
+
+        // Data type
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true);
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        dtypeGroup->setLayout(dtypeLayout);
+        layout->addWidget(dtypeGroup);
+
+        // OK/Cancel
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+
+        // Add button logic
+        connect(addButton, &QPushButton::clicked, this, [this]() {
+            QString text = substringEdit->text().trimmed();
+            if (!text.isEmpty() && !containsSubstring(text)) {
+                substringList->addItem(text);
+                substringEdit->clear();
+            }
+            });
+
+        // Remove button logic
+        connect(removeButton, &QPushButton::clicked, this, [this]() {
+            auto items = substringList->selectedItems();
+            for (QListWidgetItem* item : items) {
+                delete substringList->takeItem(substringList->row(item));
+            }
+            });
+    }
+
+    // Returns all entered substrings as a QStringList
+    QStringList enteredSubstrings() const {
+        QStringList result;
+        for (int i = 0; i < substringList->count(); ++i)
+            result << substringList->item(i)->text();
+        return result;
+    }
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+
+private:
+    bool containsSubstring(const QString& str) const {
+        for (int i = 0; i < substringList->count(); ++i)
+            if (substringList->item(i)->text() == str)
+                return true;
+        return false;
+    }
+
+    QLineEdit* substringEdit;
+    QListWidget* substringList;
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
+};

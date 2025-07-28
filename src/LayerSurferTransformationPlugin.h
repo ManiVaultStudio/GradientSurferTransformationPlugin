@@ -73,6 +73,7 @@ public:
     void normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;
