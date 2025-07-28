@@ -1,5 +1,6 @@
 #include "LayerSurferTransformationPlugin.h"
-
+#include "LayerSurferTransformationDialogs.h"
+#include "LayerSurferTransformationUtils.h"
 
 #include <QDebug>
 #include <QtCore>
@@ -9,42 +10,12 @@
 #include<QInputDialog>
 #include <QApplication>
 
+
 Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
 
 using namespace mv;
 using namespace mv::util;
 
-
-
-
-
-class FunctionTimer {
-public:
-    FunctionTimer(const QString& functionName)
-        : _functionName(functionName)
-    {
-        _timer.start();
-    }
-    ~FunctionTimer()
-    {
-        qDebug() << _functionName << "took"
-            << _timer.elapsed() / 1000.0 << "seconds";
-    }
-private:
-    QString _functionName;
-    QElapsedTimer _timer;
-};
-/*inline bool isBinaryVector(const std::vector<float>& data, float epsilon = 1e-6f)
-{
-    const float* ptr = data.data();
-    const float* end = ptr + data.size();
-    for (; ptr != end; ++ptr) {
-        float v = *ptr;
-        if (!(std::abs(v - 0.0f) < epsilon || std::abs(v - 1.0f) < epsilon))
-            return false;
-    }
-    return true;
-}*/
 LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _datasetNameSelection(""),
@@ -136,8 +107,130 @@ void LayerSurferTransformationPlugin::transformRowNormalize()
 }
 
 
+void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
+{
+    mv::Dataset<Points> points = getInputDataset<Points>();
+    if (!points.isValid())
+        return;
+    // Get reference to dataset task for reporting progress
+    mv::DatasetTask& datasetTask = points->getTask();
+    datasetTask.setName("Transforming");
+    datasetTask.setRunning();
+    datasetTask.setProgressDescription(QString("Removing zero columns."));
+    qDebug() << "Transforming dataset";
+    removeZeroColumns(points, datasetTask);
 
+}
 
+void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    // Step 1: Get dimension names
+    QStringList dimensionNames;
+    {
+        auto dims = points->getDimensionNames();
+        for (const auto& d : dims)
+            dimensionNames << d;
+    }
+    // Step 2: Show dialog (no dimension selection, always all)
+    RemoveZeroColumnsDialog dialog; // FIX: Remove parentheses to avoid "most vexing parse"
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Zero column removal cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    // Step 3: Get user selection
+    bool inplace = dialog.isInplace();
+    QString dtype = dialog.selectedDataType();
+    // Step 4: Always remove all zero columns (global removal)
+    int numPoints = points->getNumPoints();
+    int numDims = points->getNumDimensions();
+    if (numPoints == 0 || numDims == 0) {
+        datasetTask.setProgressDescription("No data to process");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    // Step 5: Prepare output data
+    std::vector<float> data(numPoints * numDims);
+    std::vector<int> dimensionIndices;
+    for (int i = 0; i < numDims; i++)
+        dimensionIndices.push_back(i);
+    points->populateDataForDimensions(data, dimensionIndices);
+    // Step 6: Identify zero columns
+    std::vector<bool> isZeroColumn(numDims, true);
+    for (int i = 0; i < numPoints; ++i) {
+        for (int j = 0; j < numDims; ++j) {
+            if (std::abs(data[i * numDims + j]) > 1e-6f) { // Non-zero value found
+                isZeroColumn[j] = false;
+            }
+        }
+    }
+    // Step 7: Create new dataset with non-zero columns
+    std::vector<float> newData;
+    std::vector<QString> newDimNames;
+
+    for (int j = 0; j < numDims; ++j) {
+        if (!isZeroColumn[j]) {
+            newDimNames.push_back(dimensionNames[j]);
+            for (int i = 0; i < numPoints; ++i) {
+                newData.push_back(data[i * numDims + j]);
+            }
+        }
+    }
+    if (newData.empty()) {
+        datasetTask.setProgressDescription("All columns are zero, no data left");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    // Step 8: Output
+    if (dtype == "bfloat16")
+    {
+        std::vector<biovault::bfloat16_t> outData(newData.size());
+        for (size_t i = 0; i < newData.size(); ++i)
+            outData[i] = static_cast<biovault::bfloat16_t>(newData[i]);
+        if (!inplace) {
+            QString newName = points->getGuiName() + "/zero_removed";
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(outData.data(), numPoints, newDimNames.size());
+            newPoints->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(outData.data(), numPoints, newDimNames.size());
+            points->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
+    }
+    else // default: float
+    {
+        if (!inplace) {
+            QString newName = points->getGuiName() + "/zero_removed";
+            Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+            newPoints->setData(newData.data(), numPoints, newDimNames.size());
+            newPoints->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(newPoints);
+            mv::events().notifyDatasetDataChanged(newPoints);
+        }
+        else {
+            points->setData(newData.data(), numPoints, newDimNames.size());
+            points->setDimensionNames(newDimNames);
+            mv::events().notifyDatasetAdded(points);
+            mv::events().notifyDatasetDataChanged(points);
+        }
+    }
+
+    datasetTask.setProgressDescription("Zero column removal complete");
+
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+
+    qDebug() << "Zero column removal complete";
+    qDebug() << "Transforming dataset finished";
+}
 
 void LayerSurferTransformationPlugin::transformCluster()
 {
@@ -932,6 +1025,24 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             }
 
 
+            // add a trigger to remove all columns that have all row values 0 
+            const QString removeZeroColumnsActionName = QString("LayerSurfer_Remove_Zero_Columns");
+            QIcon removeZeroColumnsIcon = QIcon::fromTheme("edit-delete-column"); // Use a suitable icon for removing zero columns
+            auto pluginTriggerActionRemoveZeroColumns = new mv::gui::PluginTriggerAction(
+                const_cast<LayerSurferTransformationPluginFactory*>(this),
+                this,
+                removeZeroColumnsActionName,
+                QString("Remove all columns with all row values equal to 0"),
+                removeZeroColumnsIcon,
+                [this, datasetMain](mv::gui::PluginTriggerAction& pluginTriggerActionRemoveZeroColumns) -> void {
+                    auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                    pluginInstance->setInputDataset(datasetMain);
+                    pluginInstance->transformRemoveZeroColumns();
+                }
+            );
+            pluginTriggerActions << pluginTriggerActionRemoveZeroColumns;
+
+
         }
     }
 
@@ -963,7 +1074,9 @@ void LayerSurferTransformationPlugin::createDatasets()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = QString::number(_transformationNumber) +"." + inputPointsDataset->getGuiName() + "/" + _datasetNameSelection + "/" + _splitNameSelection;
+    QString newDatasetName = QString::number(_transformationNumber) +"." 
+        //+ inputPointsDataset->getGuiName() + "/" 
+        + _datasetNameSelection + "/" + _splitNameSelection;
 
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
@@ -1003,7 +1116,10 @@ void LayerSurferTransformationPlugin::createDatasets()
                 clusterPointsDataset
             );*/
             Dataset<Points> childClusterPoints = mv::data().createDerivedDataset(
-                clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
+                //clusterPointsDataset->getGuiName() + "/" + 
+                QString::number(_transformationNumber) + "."+
+                _splitNameSelection+"/" +
+                child->getGuiName(),
                 clusterPointsDataset
             );
             events().notifyDatasetAdded(childClusterPoints);
@@ -1032,7 +1148,10 @@ void LayerSurferTransformationPlugin::createDatasets()
             // Create a new Clusters dataset for the child, as a subset of the cluster
             Dataset<Clusters> childClusterDataset = mv::data().createDataset(
                 "Cluster",
-                clusterPointsDataset->getGuiName() + "/" + child->getGuiName(),
+                //clusterPointsDataset->getGuiName() + "/" +
+                QString::number(_transformationNumber) + "." +
+                _splitNameSelection + "/" +
+                child->getGuiName(),
                 clusterPointsDataset
             );
             events().notifyDatasetAdded(childClusterDataset);
