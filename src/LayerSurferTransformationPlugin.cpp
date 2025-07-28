@@ -913,12 +913,17 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                             QStringList options;
                             int idx = 1;
                             options.append("0:All");
-                            for (const auto& cluster : clusters)
+                            if(clusters.count()<2000)
                             {
-                                QString formatted = cluster.getName();
-                                formatted = QString::number(idx) + ":" + formatted;
-                                options.append(formatted);
-                                idx++;
+
+                                for (const auto& cluster : clusters)
+                                {
+                                    QString formatted = cluster.getName();
+                                    formatted = QString::number(idx) + ":" + formatted;
+                                    options.append(formatted);
+                                    idx++;
+                                }
+
                             }
                             QPair<QString, QStringList> optionvals;
                             optionvals.first = clusterDataset->getGuiName();
@@ -934,10 +939,12 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
                         {
                             auto dimensionNames = pointDataset->getDimensionNames();
                             QStringList options;
+                            
                             for (int i = 0; i < dimensionNames.size(); i++)
                             {
                                 options.append(dimensionNames.at(i));
                             }
+
                             QPair<QString, QStringList> optionvals;
                             optionvals.first = pointDataset->getGuiName();
                             optionvals.second = options;
