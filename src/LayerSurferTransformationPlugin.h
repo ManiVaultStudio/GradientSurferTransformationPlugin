@@ -62,6 +62,7 @@ public:
     void transformCluster();
     void transformPoint();
     void transformRowNormalize();
+    void transformMultiDatasetRowNormalize();
     void transformDimensionRemove();
     void transformRemoveZeroColumns();
     // Only declare the setter, do not define it here

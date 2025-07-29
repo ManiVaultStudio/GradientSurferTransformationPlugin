@@ -71,7 +71,6 @@ void LayerSurferTransformationPlugin::transformDimensionRemove()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
 
 
     datasetTask.setProgressDescription(QString("Removing dimensions."));
@@ -82,6 +81,128 @@ void LayerSurferTransformationPlugin::transformDimensionRemove()
 
 
 
+}
+
+void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
+{
+    // Proceed with row normalization
+    mv::Datasets allDatasetsForNormalization = getInputDatasets();
+    if (allDatasetsForNormalization.isEmpty()) {
+        qWarning() << "No datasets available for row normalization.";
+        return;
+    }
+    NormalizeRowsDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    QString method = dialog.selectedMethod();
+    bool inplace = dialog.isInplace();
+    QString dtype = dialog.selectedDataType();
+
+    int totalNumRows = 0;
+    int totalNumCols = 0;
+    float globalMin = std::numeric_limits<float>::max();
+    float globalMax = std::numeric_limits<float>::lowest();
+    for (const mv::Dataset<Points>& child : getInputDatasets()) {
+        if (!child.isValid())
+            continue;
+        totalNumRows += child->getNumPoints();
+        totalNumCols += child->getNumDimensions();
+        for (int i = 0; i < child->getNumPoints() * child->getNumDimensions(); ++i) {
+            float value = child->getValueAt(i);
+            if (value < globalMin) globalMin = value;
+            if (value > globalMax) globalMax = value;
+        }
+    }
+
+    // Ensure min and max are distinct for Min-Max normalization
+    if (method.startsWith("Min-Max")) {
+        if (std::abs(globalMax - globalMin) < 1e-8f) {
+            globalMin = 0.0f;
+            globalMax = 1.0f;
+        }
+    }
+
+    int x = 2;
+    RamInfo ram = getSystemRamInfo();
+    std::uint64_t freeRam = ram.available;
+    std::uint64_t totalRam = ram.total;
+    std::uint64_t occupiedRam = (ram.total > ram.available) ? (ram.total - ram.available) : 0;
+    constexpr double bytesPerGB = 1024.0 * 1024.0 * 1024.0;
+    double freeRamGB = static_cast<double>(freeRam) / bytesPerGB;
+    double totalRamGB = static_cast<double>(totalRam) / bytesPerGB;
+    double occupiedRamGB = static_cast<double>(occupiedRam) / bytesPerGB;
+    qInfo() << "Available RAM:" << QString::number(freeRamGB, 'f', 2) << "GB,"
+        << "Total RAM:" << QString::number(totalRamGB, 'f', 2) << "GB,"
+        << "Occupied RAM:" << QString::number(occupiedRamGB, 'f', 2) << "GB";
+    constexpr uint64_t bytesPerFloat = 4ULL;
+    uint64_t requiredBytes = static_cast<uint64_t>(totalNumRows) * static_cast<uint64_t>(totalNumCols) * bytesPerFloat;
+    double requiredGB = static_cast<double>(requiredBytes) / bytesPerGB;
+
+    if (freeRam <= 0 || requiredBytes > (freeRam / x)) {
+        qWarning() << "Dataset too large to process compute data ranges:"
+            << "numRows:" << totalNumRows
+            << "numCols:" << totalNumCols
+            << "Applying default range due to RAM threshold."
+            << "Dataset requires at least" << QString::number(requiredGB, 'f', 2) << "GB memory.";
+        return;
+    }
+    for (mv::Dataset<Points> points : getInputDatasets()) {
+        if (!points.isValid())
+        {
+            continue;
+        }
+        int numPoints = points->getNumPoints();
+        int numDims = points->getNumDimensions();
+        mv::DatasetTask& datasetTask = points->getTask();
+        datasetTask.setName("Transforming dataset: " + points->getGuiName());
+        datasetTask.setRunning();
+        std::vector<float> data(numPoints * numDims);
+        std::vector<int> dimensionIndices;
+        for (int i = 0; i < numDims; i++)
+            dimensionIndices.push_back(i);
+        points->populateDataForDimensions(data, dimensionIndices);
+        //qInfo() << "Normalizing "+points->getGuiName();
+        normalizeVector(data, method.toStdString(), globalMin, globalMax);
+
+        if (dtype == "bfloat16") {
+            std::vector<biovault::bfloat16_t> outData(data.size());
+            for (size_t i = 0; i < data.size(); ++i)
+                outData[i] = static_cast<biovault::bfloat16_t>(data[i]);
+            if (!inplace) {
+                QString newName = points->getGuiName() + "/normalized";
+                Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+                newPoints->setData(outData.data(), numPoints, numDims);
+                newPoints->setDimensionNames(points->getDimensionNames());
+                mv::events().notifyDatasetAdded(newPoints);
+                mv::events().notifyDatasetDataChanged(newPoints);
+            }
+            else {
+                points->setData(outData.data(), numPoints, numDims);
+                mv::events().notifyDatasetAdded(points);
+                mv::events().notifyDatasetDataChanged(points);
+            }
+        }
+        else {
+            if (!inplace) {
+                QString newName = points->getGuiName() + "/normalized";
+                Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+                newPoints->setData(data.data(), numPoints, numDims);
+                newPoints->setDimensionNames(points->getDimensionNames());
+                mv::events().notifyDatasetAdded(newPoints);
+                mv::events().notifyDatasetDataChanged(newPoints);
+            }
+            else {
+                points->setData(data.data(), numPoints, numDims);
+                mv::events().notifyDatasetAdded(points);
+                mv::events().notifyDatasetDataChanged(points);
+            }
+        }
+
+        datasetTask.setProgressDescription("Normalization complete for current dataset");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+    }
 }
 
 void LayerSurferTransformationPlugin::transformRowNormalize()
@@ -95,7 +216,6 @@ void LayerSurferTransformationPlugin::transformRowNormalize()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
 
 
     datasetTask.setProgressDescription(QString("Normalizing rows."));
@@ -115,7 +235,7 @@ void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
     // Get reference to dataset task for reporting progress
     mv::DatasetTask& datasetTask = points->getTask();
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
+    
     datasetTask.setProgressDescription(QString("Removing zero columns."));
     qDebug() << "Transforming dataset";
     removeZeroColumns(points, datasetTask);
@@ -139,6 +259,7 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
         datasetTask.setFinished();
         return;
     }
+    datasetTask.setRunning();
     // Step 3: Get user selection
     bool inplace = dialog.isInplace();
     QString dtype = dialog.selectedDataType();
@@ -590,14 +711,14 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
     }
 
     // Step 2: Show dialog (no dimension selection, always all)
-    NormalizeRowsDialog dialog(dimensionNames);
+    NormalizeRowsDialog dialog;
     if (dialog.exec() != QDialog::Accepted) {
         datasetTask.setProgressDescription("Normalization cancelled by user");
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     // Step 3: Get user selection
     QString method = dialog.selectedMethod();
     bool inplace = dialog.isInplace();
@@ -621,59 +742,15 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
     points->populateDataForDimensions(data, dimensionIndices);
 
     // Step 6: Compute statistics for global normalization
-    float norm = 1.0f, mean = 0.0f, stddev = 1.0f, minVal = 0.0f, maxVal = 1.0f, maxAbs = 1.0f, scale = 1.0f;
-    if (method.startsWith("L2")) {
-        // L2 norm of the whole data vector
-        norm = std::sqrt(std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + b * b; }));
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("L1")) {
-        norm = std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + std::abs(b); });
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("Max")) {
-        norm = 0.0f;
-        for (float v : data) norm = std::max(norm, std::abs(v));
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("Z-Score")) {
-        // mean and stddev of all values
-        double sum = 0.0, sqsum = 0.0;
-        for (float v : data) { sum += v; sqsum += v * v; }
-        mean = static_cast<float>(sum / data.size());
-        stddev = static_cast<float>(std::sqrt(sqsum / data.size() - mean * mean));
-        if (stddev < 1e-8f) stddev = 1.0f;
-    }
-    else if (method.startsWith("Min-Max")) {
+    float minVal = 0.0f, maxVal = 1.0f;
+    if (method.startsWith("Min-Max")) {
         auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
         minVal = (minIt != data.end()) ? *minIt : 0.0f;
         maxVal = (maxIt != data.end()) ? *maxIt : 1.0f;
         if (std::abs(maxVal - minVal) < 1e-8f) { minVal = 0.0f; maxVal = 1.0f; }
     }
-    else if (method.startsWith("Decimal Scaling")) {
-        // Find max absolute value, then scale by 10^j where j = ceil(log10(maxAbs))
-        maxAbs = 0.0f;
-        for (float v : data) maxAbs = std::max(maxAbs, std::abs(v));
-        if (maxAbs < 1e-8f) maxAbs = 1.0f;
-        scale = std::pow(10.0f, std::ceil(std::log10(maxAbs)));
-        if (scale < 1e-8f) scale = 1.0f;
-    }
-
-    // Step 7: Apply normalization to all values
-    for (float& v : data) {
-        if (method.startsWith("L2") || method.startsWith("L1") || method.startsWith("Max")) {
-            v = v / norm;
-        }
-        else if (method.startsWith("Z-Score")) {
-            v = (v - mean) / stddev;
-        }
-        else if (method.startsWith("Min-Max")) {
-            v = (v - minVal) / (maxVal - minVal);
-        }
-        else if (method.startsWith("Decimal Scaling")) {
-            v = v / scale;
-        }
-    }
+    // Call the normalization utility function
+    normalizeVector(data, method.toStdString(), minVal, maxVal);
 
     // Step 8: Output
     if (dtype == "bfloat16") {
@@ -734,7 +811,7 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     // Step 3: Get user selection
     QStringList selectedDims = dialog.selectedDimensions();
     bool keepSelected = dialog.keepSelected();
@@ -939,6 +1016,33 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     if (!PluginFactory::areAllDatasetsOfTheSameType(datasets, PointType))
         return pluginTriggerActions;
 
+    // --- Multi-Dataset Normalize Rows Action ---
+    if (numberOfDatasets > 1) {
+        auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+            return new mv::gui::PluginTriggerAction(
+                const_cast<LayerSurferTransformationPluginFactory*>(this),
+                this,
+                name,
+                desc,
+                icon,
+                std::forward<decltype(func)>(func)
+            );
+            };
+
+        pluginTriggerActions << makeAction(
+            "LayerSurfer_Multi-Dataset_Point_Normalize",
+            "Perform multi dataset normalize rows data transformation",
+            QIcon::fromTheme("calculator"),
+            [this, datasets](mv::gui::PluginTriggerAction&) {
+                auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                pluginInstance->setInputDatasets(datasets);
+                pluginInstance->setType("MultiDatasetPointNormalize==>");
+                pluginInstance->transformMultiDatasetRowNormalize();
+            }
+        );
+        return pluginTriggerActions;
+    }
+
     if (numberOfDatasets != 1 || datasets.first()->getDataType() != PointType)
         return pluginTriggerActions;
 
@@ -995,7 +1099,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             if (clusterDataset.isValid()) {
                 QStringList options{ "0:All","1:Substring"};
                 const auto clusters = clusterDataset->getClusters();
-                if (clusters.count() < 100) {
+                if (clusters.count() < 500) {
                     int idx = 2;
                     for (const auto& cluster : clusters) {
                         options.append(QString::number(idx++) + ":" + cluster.getName());

@@ -307,7 +307,7 @@ private:
 class NormalizeRowsDialog : public QDialog {
     Q_OBJECT
 public:
-    NormalizeRowsDialog(const QStringList& /*dimensions*/, QWidget* parent = nullptr)
+    NormalizeRowsDialog(QWidget* parent = nullptr)
         : QDialog(parent)
     {
         setWindowTitle("Normalize Data");
