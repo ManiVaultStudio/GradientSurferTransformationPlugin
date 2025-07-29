@@ -103,16 +103,56 @@ void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
     int totalNumCols = 0;
     float globalMin = std::numeric_limits<float>::max();
     float globalMax = std::numeric_limits<float>::lowest();
+    float norm = 0.0f;
+    float mean = 0.0f;
+    float stddev = 0.0f;
+    float maxAbs = 0.0f;
+    float scale = 0.0f;
+    size_t totalCount = 0;
+
     for (const mv::Dataset<Points>& child : getInputDatasets()) {
         if (!child.isValid())
             continue;
         totalNumRows += child->getNumPoints();
         totalNumCols += child->getNumDimensions();
-        for (int i = 0; i < child->getNumPoints() * child->getNumDimensions(); ++i) {
+        size_t childCount = child->getNumPoints() * child->getNumDimensions();
+        for (size_t i = 0; i < childCount; ++i) {
             float value = child->getValueAt(i);
             if (value < globalMin) globalMin = value;
             if (value > globalMax) globalMax = value;
+            if (std::abs(value) > maxAbs) maxAbs = std::abs(value);
+            norm += value * value;
+            mean += value;
+            ++totalCount;
         }
+    }
+
+    if (totalCount > 0) {
+        norm = std::sqrt(norm);
+        mean /= static_cast<float>(totalCount);
+
+        // Compute standard deviation
+        float sumSq = 0.0f;
+        for (const mv::Dataset<Points>& child : getInputDatasets()) {
+            if (!child.isValid())
+                continue;
+            size_t childCount = child->getNumPoints() * child->getNumDimensions();
+            for (size_t i = 0; i < childCount; ++i) {
+                float value = child->getValueAt(i);
+                sumSq += (value - mean) * (value - mean);
+            }
+        }
+        stddev = std::sqrt(sumSq / static_cast<float>(totalCount));
+        scale = globalMax - globalMin;
+    }
+    else {
+        globalMin = 0.0f;
+        globalMax = 1.0f;
+        norm = 0.0f;
+        mean = 0.0f;
+        stddev = 0.0f;
+        maxAbs = 0.0f;
+        scale = 1.0f;
     }
 
     // Ensure min and max are distinct for Min-Max normalization
@@ -120,6 +160,7 @@ void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
         if (std::abs(globalMax - globalMin) < 1e-8f) {
             globalMin = 0.0f;
             globalMax = 1.0f;
+            scale = 1.0f;
         }
     }
 
@@ -163,7 +204,7 @@ void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
             dimensionIndices.push_back(i);
         points->populateDataForDimensions(data, dimensionIndices);
         //qInfo() << "Normalizing "+points->getGuiName();
-        normalizeVector(data, method.toStdString(), globalMin, globalMax);
+        normalizeVector(data, method.toStdString(), globalMin, globalMax,  norm,  mean,  stddev,  maxAbs,  scale);
 
         if (dtype == "bfloat16") {
             std::vector<biovault::bfloat16_t> outData(data.size());
@@ -294,7 +335,11 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
     for (int j = 0; j < numDims; ++j) {
         if (!isZeroColumn[j]) {
             newDimNames.push_back(dimensionNames[j]);
-            for (int i = 0; i < numPoints; ++i) {
+        }
+    }
+    for (int i = 0; i < numPoints; ++i) {
+        for (int j = 0; j < numDims; ++j) {
+            if (!isZeroColumn[j]) {
                 newData.push_back(data[i * numDims + j]);
             }
         }
@@ -742,15 +787,47 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
     points->populateDataForDimensions(data, dimensionIndices);
 
     // Step 6: Compute statistics for global normalization
-    float minVal = 0.0f, maxVal = 1.0f;
-    if (method.startsWith("Min-Max")) {
-        auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
-        minVal = (minIt != data.end()) ? *minIt : 0.0f;
-        maxVal = (maxIt != data.end()) ? *maxIt : 1.0f;
-        if (std::abs(maxVal - minVal) < 1e-8f) { minVal = 0.0f; maxVal = 1.0f; }
+    float minVal = std::numeric_limits<float>::max();
+    float maxVal = std::numeric_limits<float>::lowest();
+    float norm = 0.0f;
+    float mean = 0.0f;
+    float stddev = 0.0f;
+    float maxAbs = 0.0f;
+    float scale = 0.0f;
+
+    if (!data.empty()) {
+        // Min, Max, MaxAbs
+        for (float v : data) {
+            if (v < minVal) minVal = v;
+            if (v > maxVal) maxVal = v;
+            if (std::abs(v) > maxAbs) maxAbs = std::abs(v);
+            norm += v * v;
+            mean += v;
+        }
+        norm = std::sqrt(norm);
+        mean /= static_cast<float>(data.size());
+
+        // Standard deviation
+        float sumSq = 0.0f;
+        for (float v : data) {
+            sumSq += (v - mean) * (v - mean);
+        }
+        stddev = std::sqrt(sumSq / static_cast<float>(data.size()));
+
+        // Scale: difference between max and min
+        scale = maxVal - minVal;
+    }
+    else {
+        minVal = 0.0f;
+        maxVal = 1.0f;
+        norm = 0.0f;
+        mean = 0.0f;
+        stddev = 0.0f;
+        maxAbs = 0.0f;
+        scale = 1.0f;
     }
     // Call the normalization utility function
-    normalizeVector(data, method.toStdString(), minVal, maxVal);
+    normalizeVector(data, method.toStdString(), minVal, maxVal,  norm,  mean,  stddev,  maxAbs,  scale);
 
     // Step 8: Output
     if (dtype == "bfloat16") {

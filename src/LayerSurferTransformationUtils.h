@@ -18,7 +18,7 @@ struct RamInfo {
 // Only declarations here
 RamInfo getSystemRamInfo();
 std::uint64_t getAvailableRAM();
-void normalizeVector(std::vector<float>& data, const std::string& method, float minVal, float maxVal);
+void normalizeVector(std::vector<float>& data, const std::string& method, float minVal, float maxVal, float norm, float mean, float stddev, float maxAbs, float scale);
 
 
 // Utility timer for profiling function execution time

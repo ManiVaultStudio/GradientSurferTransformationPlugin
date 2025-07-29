@@ -325,6 +325,17 @@ public:
         methodCombo->addItem("Z-Score");
         methodCombo->addItem("Min-Max");
         methodCombo->addItem("Decimal Scaling");
+        methodCombo->addItem("MaxAbs");
+        methodCombo->addItem("Log1p");
+        methodCombo->addItem("CPM");
+        methodCombo->addItem("CPM_Log1p");
+        methodCombo->addItem("CPM_Log1p_ZScore");
+        methodCombo->addItem("Log2");
+        methodCombo->addItem("Mean");
+        methodCombo->addItem("Softmax");
+        methodCombo->addItem("Robust");
+        methodCombo->addItem("UnitRange");
+        methodCombo->addItem("Binarize");
         layout->addWidget(methodCombo);
 
         // Output mode
