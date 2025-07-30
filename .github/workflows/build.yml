@@ -1,4 +1,4 @@
-name: LayerSurferTransformationPlugin
+name: GradientSurferTransformationPlugin
 
 on:
   push:

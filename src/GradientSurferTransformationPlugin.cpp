@@ -1,6 +1,6 @@
-#include "LayerSurferTransformationPlugin.h"
-#include "LayerSurferTransformationDialogs.h"
-#include "LayerSurferTransformationUtils.h"
+#include "GradientSurferTransformationPlugin.h"
+#include "GradientSurferTransformationDialogs.h"
+#include "GradientSurferTransformationUtils.h"
 
 #include <QDebug>
 #include <QtCore>
@@ -11,12 +11,12 @@
 #include <QApplication>
 
 
-Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
+Q_PLUGIN_METADATA(IID "studio.manivault.GradientSurferTransformationPlugin")
 
 using namespace mv;
 using namespace mv::util;
 
-LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
+GradientSurferTransformationPlugin::GradientSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _datasetNameSelection(""),
     _splitNameSelection(""),
@@ -26,12 +26,12 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
     qApp->setStyleSheet("QToolTip { color: black; background: #ffffe1; border: 1px solid black; }");
 }
 
-void LayerSurferTransformationPlugin::transform()
+void GradientSurferTransformationPlugin::transform()
 {
 
 }
 
-void LayerSurferTransformationPlugin::transformPoint()
+void GradientSurferTransformationPlugin::transformPoint()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
     if (!points.isValid())
@@ -60,7 +60,7 @@ void LayerSurferTransformationPlugin::transformPoint()
 
 }
 
-void LayerSurferTransformationPlugin::transformDimensionRemove()
+void GradientSurferTransformationPlugin::transformDimensionRemove()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -71,7 +71,6 @@ void LayerSurferTransformationPlugin::transformDimensionRemove()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
 
 
     datasetTask.setProgressDescription(QString("Removing dimensions."));
@@ -84,7 +83,170 @@ void LayerSurferTransformationPlugin::transformDimensionRemove()
 
 }
 
-void LayerSurferTransformationPlugin::transformRowNormalize()
+void GradientSurferTransformationPlugin::transformMultiDatasetRowNormalize()
+{
+    // Proceed with row normalization
+    mv::Datasets allDatasetsForNormalization = getInputDatasets();
+    if (allDatasetsForNormalization.isEmpty()) {
+        qWarning() << "No datasets available for row normalization.";
+        return;
+    }
+    NormalizeRowsDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    QString method = dialog.selectedMethod();
+    bool inplace = dialog.isInplace();
+    QString dtype = dialog.selectedDataType();
+
+    int totalNumRows = 0;
+    int totalNumCols = 0;
+    float globalMin = std::numeric_limits<float>::max();
+    float globalMax = std::numeric_limits<float>::lowest();
+    float norm = 0.0f;
+    float mean = 0.0f;
+    float stddev = 0.0f;
+    float maxAbs = 0.0f;
+    float scale = 0.0f;
+    size_t totalCount = 0;
+
+    for (const mv::Dataset<Points>& child : getInputDatasets()) {
+        if (!child.isValid())
+            continue;
+        totalNumRows += child->getNumPoints();
+        totalNumCols += child->getNumDimensions();
+        size_t childCount = child->getNumPoints() * child->getNumDimensions();
+        for (size_t i = 0; i < childCount; ++i) {
+            float value = child->getValueAt(i);
+            if (value < globalMin) globalMin = value;
+            if (value > globalMax) globalMax = value;
+            if (std::abs(value) > maxAbs) maxAbs = std::abs(value);
+            norm += value * value;
+            mean += value;
+            ++totalCount;
+        }
+    }
+
+    if (totalCount > 0) {
+        norm = std::sqrt(norm);
+        mean /= static_cast<float>(totalCount);
+
+        // Compute standard deviation
+        float sumSq = 0.0f;
+        for (const mv::Dataset<Points>& child : getInputDatasets()) {
+            if (!child.isValid())
+                continue;
+            size_t childCount = child->getNumPoints() * child->getNumDimensions();
+            for (size_t i = 0; i < childCount; ++i) {
+                float value = child->getValueAt(i);
+                sumSq += (value - mean) * (value - mean);
+            }
+        }
+        stddev = std::sqrt(sumSq / static_cast<float>(totalCount));
+        scale = globalMax - globalMin;
+    }
+    else {
+        globalMin = 0.0f;
+        globalMax = 1.0f;
+        norm = 0.0f;
+        mean = 0.0f;
+        stddev = 0.0f;
+        maxAbs = 0.0f;
+        scale = 1.0f;
+    }
+
+    // Ensure min and max are distinct for Min-Max normalization
+    if (method.startsWith("Min-Max")) {
+        if (std::abs(globalMax - globalMin) < 1e-8f) {
+            globalMin = 0.0f;
+            globalMax = 1.0f;
+            scale = 1.0f;
+        }
+    }
+
+    int x = 2;
+    RamInfo ram = getSystemRamInfo();
+    std::uint64_t freeRam = ram.available;
+    std::uint64_t totalRam = ram.total;
+    std::uint64_t occupiedRam = (ram.total > ram.available) ? (ram.total - ram.available) : 0;
+    constexpr double bytesPerGB = 1024.0 * 1024.0 * 1024.0;
+    double freeRamGB = static_cast<double>(freeRam) / bytesPerGB;
+    double totalRamGB = static_cast<double>(totalRam) / bytesPerGB;
+    double occupiedRamGB = static_cast<double>(occupiedRam) / bytesPerGB;
+    qInfo() << "Available RAM:" << QString::number(freeRamGB, 'f', 2) << "GB,"
+        << "Total RAM:" << QString::number(totalRamGB, 'f', 2) << "GB,"
+        << "Occupied RAM:" << QString::number(occupiedRamGB, 'f', 2) << "GB";
+    constexpr uint64_t bytesPerFloat = 4ULL;
+    uint64_t requiredBytes = static_cast<uint64_t>(totalNumRows) * static_cast<uint64_t>(totalNumCols) * bytesPerFloat;
+    double requiredGB = static_cast<double>(requiredBytes) / bytesPerGB;
+
+    if (freeRam <= 0 || requiredBytes > (freeRam / x)) {
+        qWarning() << "Dataset too large to process compute data ranges:"
+            << "numRows:" << totalNumRows
+            << "numCols:" << totalNumCols
+            << "Applying default range due to RAM threshold."
+            << "Dataset requires at least" << QString::number(requiredGB, 'f', 2) << "GB memory.";
+        return;
+    }
+    for (mv::Dataset<Points> points : getInputDatasets()) {
+        if (!points.isValid())
+        {
+            continue;
+        }
+        int numPoints = points->getNumPoints();
+        int numDims = points->getNumDimensions();
+        mv::DatasetTask& datasetTask = points->getTask();
+        datasetTask.setName("Transforming dataset: " + points->getGuiName());
+        datasetTask.setRunning();
+        std::vector<float> data(numPoints * numDims);
+        std::vector<int> dimensionIndices;
+        for (int i = 0; i < numDims; i++)
+            dimensionIndices.push_back(i);
+        points->populateDataForDimensions(data, dimensionIndices);
+        //qInfo() << "Normalizing "+points->getGuiName();
+        normalizeVector(data, method.toStdString(), globalMin, globalMax,  norm,  mean,  stddev,  maxAbs,  scale);
+
+        if (dtype == "bfloat16") {
+            std::vector<biovault::bfloat16_t> outData(data.size());
+            for (size_t i = 0; i < data.size(); ++i)
+                outData[i] = static_cast<biovault::bfloat16_t>(data[i]);
+            if (!inplace) {
+                QString newName = points->getGuiName() + "/normalized";
+                Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+                newPoints->setData(outData.data(), numPoints, numDims);
+                newPoints->setDimensionNames(points->getDimensionNames());
+                mv::events().notifyDatasetAdded(newPoints);
+                mv::events().notifyDatasetDataChanged(newPoints);
+            }
+            else {
+                points->setData(outData.data(), numPoints, numDims);
+                mv::events().notifyDatasetAdded(points);
+                mv::events().notifyDatasetDataChanged(points);
+            }
+        }
+        else {
+            if (!inplace) {
+                QString newName = points->getGuiName() + "/normalized";
+                Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+                newPoints->setData(data.data(), numPoints, numDims);
+                newPoints->setDimensionNames(points->getDimensionNames());
+                mv::events().notifyDatasetAdded(newPoints);
+                mv::events().notifyDatasetDataChanged(newPoints);
+            }
+            else {
+                points->setData(data.data(), numPoints, numDims);
+                mv::events().notifyDatasetAdded(points);
+                mv::events().notifyDatasetDataChanged(points);
+            }
+        }
+
+        datasetTask.setProgressDescription("Normalization complete for current dataset");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+    }
+}
+
+void GradientSurferTransformationPlugin::transformRowNormalize()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -95,7 +257,6 @@ void LayerSurferTransformationPlugin::transformRowNormalize()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
 
 
     datasetTask.setProgressDescription(QString("Normalizing rows."));
@@ -107,7 +268,7 @@ void LayerSurferTransformationPlugin::transformRowNormalize()
 }
 
 
-void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
+void GradientSurferTransformationPlugin::transformRemoveZeroColumns()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
     if (!points.isValid())
@@ -115,14 +276,14 @@ void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
     // Get reference to dataset task for reporting progress
     mv::DatasetTask& datasetTask = points->getTask();
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
+    
     datasetTask.setProgressDescription(QString("Removing zero columns."));
     qDebug() << "Transforming dataset";
     removeZeroColumns(points, datasetTask);
 
 }
 
-void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -139,6 +300,7 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
         datasetTask.setFinished();
         return;
     }
+    datasetTask.setRunning();
     // Step 3: Get user selection
     bool inplace = dialog.isInplace();
     QString dtype = dialog.selectedDataType();
@@ -173,7 +335,11 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
     for (int j = 0; j < numDims; ++j) {
         if (!isZeroColumn[j]) {
             newDimNames.push_back(dimensionNames[j]);
-            for (int i = 0; i < numPoints; ++i) {
+        }
+    }
+    for (int i = 0; i < numPoints; ++i) {
+        for (int j = 0; j < numDims; ++j) {
+            if (!isZeroColumn[j]) {
                 newData.push_back(data[i * numDims + j]);
             }
         }
@@ -232,7 +398,7 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
     qDebug() << "Transforming dataset finished";
 }
 
-void LayerSurferTransformationPlugin::transformCluster()
+void GradientSurferTransformationPlugin::transformCluster()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -253,7 +419,11 @@ void LayerSurferTransformationPlugin::transformCluster()
     }
     datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _datasetNameSelection, _splitNameSelection));
     qDebug() << "Transforming dataset";
-    if (_splitNameSelection == "All")
+    if (_splitNameSelection == "Substring")
+    {
+        createDatasetsSubstring(points, datasetTask);
+    }
+    else if (_splitNameSelection == "All")
     {
         createDatasetsMultInitCluster(points, datasetTask);
     }
@@ -265,7 +435,90 @@ void LayerSurferTransformationPlugin::transformCluster()
 
 
 }
-void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+
+void GradientSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    ExtractByClusterSubstringDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Substring extraction cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    const QStringList substrings = dialog.enteredSubstrings();
+    const QString dtype = dialog.selectedDataType();
+
+    if (substrings.isEmpty()) {
+        datasetTask.setProgressDescription("No substrings entered");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    bool foundClusterDataset = false;
+    for (const mv::Dataset<Clusters>& child : points->getChildren()) {
+        if (child->getDataType() == ClusterType && child->getGuiName() == _datasetNameSelection) {
+            foundClusterDataset = true;
+            _clustersSplitDataset = child;
+            const auto& clusters = _clustersSplitDataset->getClusters();
+            const int totalClusters = substrings.size();
+            int processedClusters = 0;
+
+            for (int idx = 0; idx < totalClusters; ++idx) {
+                const QString& substring = substrings[idx];
+                _splitIndices.clear();
+
+                // Collect indices for clusters whose name contains the substring
+                for (const auto& cluster : clusters) {
+                    if (cluster.getName().contains(substring)) {
+                        const auto& clusterIndices = cluster.getIndices();
+                        _splitIndices.insert(_splitIndices.end(), clusterIndices.begin(), clusterIndices.end());
+                    }
+                }
+
+                _transformationNumber = idx + 1;
+                _splitNameSelection = substring;
+                _splitIndicesMap.clear();
+                for (int i = 0; i < static_cast<int>(_splitIndices.size()); ++i) {
+                    _splitIndicesMap[_splitIndices[i]] = i;
+                }
+
+                if (_splitIndicesMap.empty()) {
+                    datasetTask.setProgressDescription(QString("No indices found for cluster %1").arg(_splitNameSelection));
+                    datasetTask.setProgress(static_cast<float>(processedClusters + 1) / totalClusters);
+                    continue; // Don't return, continue with next substring
+                }
+
+                datasetTask.setProgressDescription(
+                    QString("Processing cluster %1 of %2: %3")
+                    .arg(idx + 1)
+                    .arg(totalClusters)
+                    .arg(_splitNameSelection)
+                );
+
+                createDatasets();
+
+                ++processedClusters;
+                datasetTask.setProgress(static_cast<float>(processedClusters) / totalClusters);
+
+                qDebug() << "Processing substring:" << substring;
+            }
+            break; // Only process the first matching cluster dataset
+        }
+    }
+
+    if (!foundClusterDataset) {
+        datasetTask.setProgressDescription(QString("No matching cluster dataset found for %1").arg(_datasetNameSelection));
+    }
+    else {
+        datasetTask.setProgressDescription("Substring extraction complete");
+    }
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
+
+void GradientSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
@@ -338,7 +591,7 @@ void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     FunctionTimer timer(Q_FUNC_INFO);
     _pointsSplitDataset = nullptr;
@@ -492,7 +745,7 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -503,14 +756,14 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
     }
 
     // Step 2: Show dialog (no dimension selection, always all)
-    NormalizeRowsDialog dialog(dimensionNames);
+    NormalizeRowsDialog dialog;
     if (dialog.exec() != QDialog::Accepted) {
         datasetTask.setProgressDescription("Normalization cancelled by user");
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     // Step 3: Get user selection
     QString method = dialog.selectedMethod();
     bool inplace = dialog.isInplace();
@@ -534,59 +787,47 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
     points->populateDataForDimensions(data, dimensionIndices);
 
     // Step 6: Compute statistics for global normalization
-    float norm = 1.0f, mean = 0.0f, stddev = 1.0f, minVal = 0.0f, maxVal = 1.0f, maxAbs = 1.0f, scale = 1.0f;
-    if (method.startsWith("L2")) {
-        // L2 norm of the whole data vector
-        norm = std::sqrt(std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + b * b; }));
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("L1")) {
-        norm = std::accumulate(data.begin(), data.end(), 0.0f, [](float a, float b) { return a + std::abs(b); });
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("Max")) {
-        norm = 0.0f;
-        for (float v : data) norm = std::max(norm, std::abs(v));
-        if (norm < 1e-8f) norm = 1.0f;
-    }
-    else if (method.startsWith("Z-Score")) {
-        // mean and stddev of all values
-        double sum = 0.0, sqsum = 0.0;
-        for (float v : data) { sum += v; sqsum += v * v; }
-        mean = static_cast<float>(sum / data.size());
-        stddev = static_cast<float>(std::sqrt(sqsum / data.size() - mean * mean));
-        if (stddev < 1e-8f) stddev = 1.0f;
-    }
-    else if (method.startsWith("Min-Max")) {
-        auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
-        minVal = (minIt != data.end()) ? *minIt : 0.0f;
-        maxVal = (maxIt != data.end()) ? *maxIt : 1.0f;
-        if (std::abs(maxVal - minVal) < 1e-8f) { minVal = 0.0f; maxVal = 1.0f; }
-    }
-    else if (method.startsWith("Decimal Scaling")) {
-        // Find max absolute value, then scale by 10^j where j = ceil(log10(maxAbs))
-        maxAbs = 0.0f;
-        for (float v : data) maxAbs = std::max(maxAbs, std::abs(v));
-        if (maxAbs < 1e-8f) maxAbs = 1.0f;
-        scale = std::pow(10.0f, std::ceil(std::log10(maxAbs)));
-        if (scale < 1e-8f) scale = 1.0f;
-    }
+    float minVal = std::numeric_limits<float>::max();
+    float maxVal = std::numeric_limits<float>::lowest();
+    float norm = 0.0f;
+    float mean = 0.0f;
+    float stddev = 0.0f;
+    float maxAbs = 0.0f;
+    float scale = 0.0f;
 
-    // Step 7: Apply normalization to all values
-    for (float& v : data) {
-        if (method.startsWith("L2") || method.startsWith("L1") || method.startsWith("Max")) {
-            v = v / norm;
+    if (!data.empty()) {
+        // Min, Max, MaxAbs
+        for (float v : data) {
+            if (v < minVal) minVal = v;
+            if (v > maxVal) maxVal = v;
+            if (std::abs(v) > maxAbs) maxAbs = std::abs(v);
+            norm += v * v;
+            mean += v;
         }
-        else if (method.startsWith("Z-Score")) {
-            v = (v - mean) / stddev;
+        norm = std::sqrt(norm);
+        mean /= static_cast<float>(data.size());
+
+        // Standard deviation
+        float sumSq = 0.0f;
+        for (float v : data) {
+            sumSq += (v - mean) * (v - mean);
         }
-        else if (method.startsWith("Min-Max")) {
-            v = (v - minVal) / (maxVal - minVal);
-        }
-        else if (method.startsWith("Decimal Scaling")) {
-            v = v / scale;
-        }
+        stddev = std::sqrt(sumSq / static_cast<float>(data.size()));
+
+        // Scale: difference between max and min
+        scale = maxVal - minVal;
     }
+    else {
+        minVal = 0.0f;
+        maxVal = 1.0f;
+        norm = 0.0f;
+        mean = 0.0f;
+        stddev = 0.0f;
+        maxAbs = 0.0f;
+        scale = 1.0f;
+    }
+    // Call the normalization utility function
+    normalizeVector(data, method.toStdString(), minVal, maxVal,  norm,  mean,  stddev,  maxAbs,  scale);
 
     // Step 8: Output
     if (dtype == "bfloat16") {
@@ -629,7 +870,7 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
 }
 
 
-void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -647,7 +888,7 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     // Step 3: Get user selection
     QStringList selectedDims = dialog.selectedDimensions();
     bool keepSelected = dialog.keepSelected();
@@ -730,7 +971,7 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
@@ -785,7 +1026,7 @@ void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Datase
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::setType(const QString& type)
+void GradientSurferTransformationPlugin::setType(const QString& type)
 {
     // Split by "=>"
     QStringList transformationTypeExtract = type.split("==>");
@@ -813,11 +1054,11 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
 // Plugin Factory 
 // =============================================================================
 
-LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
+GradientSurferTransformationPluginFactory::GradientSurferTransformationPluginFactory()
 {
     setIconByName("barcode");
-	getPluginMetadata().setDescription("LayerSurfer transformation plugin");
-    getPluginMetadata().setSummary("This layerSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
+	getPluginMetadata().setDescription("GradientSurfer transformation plugin");
+    getPluginMetadata().setSummary("This GradientSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
     getPluginMetadata().setCopyrightHolder({ "BioVault (Biomedical Visual Analytics Unit LUMC - TU Delft)" });
     getPluginMetadata().setAuthors({
     });
@@ -828,235 +1069,199 @@ LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
     getPluginMetadata().setLicenseText("This plugin is distributed under the [LGPL v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html) license.");
 }
 
-LayerSurferTransformationPlugin* LayerSurferTransformationPluginFactory::produce()
+GradientSurferTransformationPlugin* GradientSurferTransformationPluginFactory::produce()
 {
-    // Return a new instance of the layerSurfer transformation plugin
-    return new LayerSurferTransformationPlugin(this);
+    // Return a new instance of the GradientSurfer transformation plugin
+    return new GradientSurferTransformationPlugin(this);
 }
 
-mv::DataTypes LayerSurferTransformationPluginFactory::supportedDataTypes() const
+mv::DataTypes GradientSurferTransformationPluginFactory::supportedDataTypes() const
 {
     DataTypes supportedTypes;
 
-    // This layerSurfer transformation plugin is compatible with points datasets
+    // This GradientSurfer transformation plugin is compatible with points datasets
     supportedTypes.append(PointType);
 
     return supportedTypes;
 }
 
-mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginTriggerActions(const mv::Datasets& datasets) const
+mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPluginTriggerActions(const mv::Datasets& datasets) const
 {
     mv::gui::PluginTriggerActions pluginTriggerActions;
-
     const auto numberOfDatasets = datasets.count();
 
-    if (PluginFactory::areAllDatasetsOfTheSameType(datasets, PointType)) {
-        if (numberOfDatasets == 1 && datasets.first()->getDataType() == PointType) {
-            
-            Dataset<Points> datasetMain = datasets.first();
-            if (datasetMain->getNumDimensions() > 0 && datasetMain->getNumPoints() > 0)
-            {
-                const QString removeActionName = QString("LayerSurfer_Dimension_Remove");
-                QIcon removeIcon = QIcon::fromTheme("trash");
-                auto pluginTriggerActionRemove = new mv::gui::PluginTriggerAction(
-                    const_cast<LayerSurferTransformationPluginFactory*>(this),
-                    this,
-                    removeActionName,
-                    QString("Perform dimension removal data transformation"),
-                    removeIcon,
-                    [this, datasetMain](mv::gui::PluginTriggerAction& pluginTriggerActionRemove) -> void {
-                            auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                            pluginInstance->setInputDataset(datasetMain);
-                            pluginInstance->setType(QString("DimensionRemove==>"));
-                            pluginInstance->transformDimensionRemove();
-            
-                    }
-                );
+    if (!PluginFactory::areAllDatasetsOfTheSameType(datasets, PointType))
+        return pluginTriggerActions;
 
-                pluginTriggerActions << pluginTriggerActionRemove;
-
-                const QString normalizeActionName = QString("LayerSurfer_Point_Normalize");
-                QIcon normalizeIcon = QIcon::fromTheme("calculator");
-                auto pluginTriggerActionNormalize = new mv::gui::PluginTriggerAction(
-                    const_cast<LayerSurferTransformationPluginFactory*>(this),
-                    this,
-                    normalizeActionName,
-                    QString("Perform normalize rows data transformation"),
-                    normalizeIcon,
-                    [this, datasetMain](mv::gui::PluginTriggerAction& pluginTriggerActionNormalize) -> void {
-
-                            auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                            pluginInstance->setInputDataset(datasetMain);
-                            pluginInstance->setType(QString("PointNormalize==>"));
-                            pluginInstance->transformRowNormalize();
-                    }
-                );
-
-                pluginTriggerActions << pluginTriggerActionNormalize;
-
-
-
-            }
-
-            auto children = datasetMain->getChildren();
-            if (children.count() > 0) {
-                QVector<QPair<QString,QStringList>> clusterOptionTypes;
-                QVector<QPair<QString,QStringList>> pointOptionTypes;
-                
-                
-                for (const auto& child : children) {
-                    if (child->getDataType() == ClusterType) {
-                        Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(child.getDatasetId());
-                        if (clusterDataset.isValid())
-                        {
-                            auto clusters = clusterDataset->getClusters();
-                            QStringList options;
-                            int idx = 1;
-                            options.append("0:All");
-                            if(clusters.count()<2000)
-                            {
-
-                                for (const auto& cluster : clusters)
-                                {
-                                    QString formatted = cluster.getName();
-                                    formatted = QString::number(idx) + ":" + formatted;
-                                    options.append(formatted);
-                                    idx++;
-                                }
-
-                            }
-                            QPair<QString, QStringList> optionvals;
-                            optionvals.first = clusterDataset->getGuiName();
-                            optionvals.second = options;
-                            clusterOptionTypes.append(optionvals);
-                        }
-
-                    }
-                    if (child->getDataType() == PointType)
-                    {
-                        Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
-                        if (pointDataset.isValid())
-                        {
-                            auto dimensionNames = pointDataset->getDimensionNames();
-                            QStringList options;
-                            
-                            for (int i = 0; i < dimensionNames.size(); i++)
-                            {
-                                options.append(dimensionNames.at(i));
-                            }
-
-                            QPair<QString, QStringList> optionvals;
-                            optionvals.first = pointDataset->getGuiName();
-                            optionvals.second = options;
-                            pointOptionTypes.append(optionvals);
-                        }
-
-                    }
-                }
-                if (clusterOptionTypes.size() > 0)
-                {
-                    for (const auto& optionType : clusterOptionTypes)
-                    {
-                        // optionType.first: main category
-                        // optionType.second: QStringList of sub-options
-                        QIcon clusterIcon = QIcon::fromTheme("object-ungroup");
-                        for (int i = 0; i < optionType.second.size(); ++i)
-                        {
-                            const QString& subOption = optionType.second[i];
-                            QString firstCopy = optionType.first;
-                            QString subCopy = subOption;
-                            firstCopy.replace("/", " ");
-                            subCopy.replace("/", " ");
-                            const QString actionName = QString("LayerSurfer_Cluster_Split/%1/%2").arg(firstCopy, subCopy);
-
-                            auto pluginTriggerActionCluster = new mv::gui::PluginTriggerAction(
-                                const_cast<LayerSurferTransformationPluginFactory*>(this),
-                                this,
-                                actionName,
-                                QString("Perform %1 (%2) data transformation").arg(optionType.first, subOption),
-                                icon(),
-                                // Explicitly capture optionType and subOption by value
-                                [this, datasetMain, optionType, subOption](mv::gui::PluginTriggerAction& pluginTriggerActionCluster) -> void {
-                                        auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                                        pluginInstance->setInputDataset(datasetMain);
-                                        // Use the setter instead of direct member access
-                                        pluginInstance->setType(QString("ClusterSplit==>%1-->%2").arg(optionType.first, subOption));
-                                        // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
-                                        pluginInstance->transformCluster();
-
-                                }
-                            );
-
-                            pluginTriggerActions << pluginTriggerActionCluster;
-                        }
-                    }
-                }
-
-                if (pointOptionTypes.size() > 0)
-                {
-                    for (const auto& optionType : pointOptionTypes)
-                    {
-                        QIcon pointIcon = QIcon::fromTheme("object-ungroup");
-                        for (int i = 0; i < optionType.second.size(); ++i)
-                        {
-                            const QString& subOption = optionType.second[i];
-                            QString firstCopy = optionType.first;
-                            QString subCopy = subOption;
-                            firstCopy.replace("/", " ");
-                            subCopy.replace("/", " ");
-                            const QString actionName = QString("LayerSurfer_Point_Split/%1/%2").arg(firstCopy, subCopy);
-
-                            auto pluginTriggerActionPoint = new mv::gui::PluginTriggerAction(
-                                const_cast<LayerSurferTransformationPluginFactory*>(this),
-                                this,
-                                actionName,
-                                QString("Perform %1 (%2) data transformation").arg(optionType.first, subOption),
-                                icon(),
-                                // Explicitly capture optionType and subOption by value
-                                [this, datasetMain, optionType, subOption](mv::gui::PluginTriggerAction& pluginTriggerActionPoint) -> void {
-
-                                        auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                                        pluginInstance->setInputDataset(datasetMain);
-                                        // Use the setter instead of direct member access
-                                        pluginInstance->setType(QString("PointSplit==>%1-->%2").arg(optionType.first, subOption));
-                                        // pluginInstance->setSelection(optionType.first, subOption); // (optional, if implemented)
-                                        pluginInstance->transformPoint();
-                                    
-                                }
-                            );
-
-                            pluginTriggerActions << pluginTriggerActionPoint;
-                        }
-                    }
-                }
-            }
-
-
-            // add a trigger to remove all columns that have all row values 0 
-            const QString removeZeroColumnsActionName = QString("LayerSurfer_Remove_Zero_Columns");
-            QIcon removeZeroColumnsIcon = QIcon::fromTheme("edit-delete-column"); // Use a suitable icon for removing zero columns
-            auto pluginTriggerActionRemoveZeroColumns = new mv::gui::PluginTriggerAction(
-                const_cast<LayerSurferTransformationPluginFactory*>(this),
+    // --- Multi-Dataset Normalize Rows Action ---
+    if (numberOfDatasets > 1) {
+        auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+            return new mv::gui::PluginTriggerAction(
+                const_cast<GradientSurferTransformationPluginFactory*>(this),
                 this,
-                removeZeroColumnsActionName,
-                QString("Remove all columns with all row values equal to 0"),
-                removeZeroColumnsIcon,
-                [this, datasetMain](mv::gui::PluginTriggerAction& pluginTriggerActionRemoveZeroColumns) -> void {
-                    auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                    pluginInstance->setInputDataset(datasetMain);
-                    pluginInstance->transformRemoveZeroColumns();
-                }
+                name,
+                desc,
+                icon,
+                std::forward<decltype(func)>(func)
             );
-            pluginTriggerActions << pluginTriggerActionRemoveZeroColumns;
+            };
 
+        pluginTriggerActions << makeAction(
+            "GradientSurfer_Multi-Dataset_Point_Normalize",
+            "Perform multi dataset normalize rows data transformation",
+            QIcon::fromTheme("calculator"),
+            [this, datasets](mv::gui::PluginTriggerAction&) {
+                auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                pluginInstance->setInputDatasets(datasets);
+                pluginInstance->setType("MultiDatasetPointNormalize==>");
+                pluginInstance->transformMultiDatasetRowNormalize();
+            }
+        );
+        return pluginTriggerActions;
+    }
 
+    if (numberOfDatasets != 1 || datasets.first()->getDataType() != PointType)
+        return pluginTriggerActions;
+
+    Dataset<Points> datasetMain = datasets.first();
+    if (datasetMain->getNumDimensions() <= 0 || datasetMain->getNumPoints() <= 0)
+        return pluginTriggerActions;
+
+    // --- Helper lambdas for action creation ---
+    auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+        return new mv::gui::PluginTriggerAction(
+            const_cast<GradientSurferTransformationPluginFactory*>(this),
+            this,
+            name,
+            desc,
+            icon,
+            std::forward<decltype(func)>(func)
+        );
+        };
+
+    // --- Dimension Remove Action ---
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Dimension_Remove",
+        "Perform dimension removal data transformation",
+        QIcon::fromTheme("trash"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->setType("DimensionRemove==>");
+            pluginInstance->transformDimensionRemove();
+        }
+    );
+
+    // --- Normalize Rows Action ---
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Point_Normalize",
+        "Perform normalize rows data transformation",
+        QIcon::fromTheme("calculator"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->setType("PointNormalize==>");
+            pluginInstance->transformRowNormalize();
+        }
+    );
+
+    // --- Collect child dataset options ---
+    QVector<QPair<QString, QStringList>> clusterOptionTypes, pointOptionTypes;
+    const auto children = datasetMain->getChildren();
+    bool containsClusterchildren = false;
+    for (const auto& child : children) {
+        if (child->getDataType() == ClusterType) {
+            containsClusterchildren = true;
+            Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(child.getDatasetId());
+            if (clusterDataset.isValid()) {
+                QStringList options{ "0:All","1:Substring"};
+                const auto clusters = clusterDataset->getClusters();
+                if (clusters.count() < 500) {
+                    int idx = 2;
+                    for (const auto& cluster : clusters) {
+                        options.append(QString::number(idx++) + ":" + cluster.getName());
+                    }
+                }
+                clusterOptionTypes.append({ clusterDataset->getGuiName(), options });
+            }
+        }
+        if (child->getDataType() == PointType) {
+            Dataset<Points> pointDataset = mv::data().getDataset<Points>(child.getDatasetId());
+            if (pointDataset.isValid()) {
+                QStringList options;
+                const auto dimensionNames = pointDataset->getDimensionNames();
+                for (const auto& name : dimensionNames)
+                    options.append(name);
+                pointOptionTypes.append({ pointDataset->getGuiName(), options });
+            }
         }
     }
+
+    // --- Cluster Split Actions ---
+    for (const auto& optionType : clusterOptionTypes) {
+        const QString& mainCategory = optionType.first;
+        
+        // Actions for splitting by cluster name or "All" 
+        for (const auto& subOption : optionType.second) {
+            QString firstCopy = mainCategory, subCopy = subOption;
+            firstCopy.replace("/", " ");
+            subCopy.replace("/", " ");
+            const QString actionName = QString("GradientSurfer_Cluster_Split/%1/%2").arg(firstCopy, subCopy);
+
+            pluginTriggerActions << makeAction(
+                actionName,
+                QString("Perform %1 (%2) data transformation").arg(mainCategory, subOption),
+                QIcon::fromTheme("object-ungroup"),
+                [this, datasetMain, mainCategory, subOption](mv::gui::PluginTriggerAction&) {
+                    auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                    pluginInstance->setInputDataset(datasetMain);
+                    pluginInstance->setType(QString("ClusterSplit==>%1-->%2").arg(mainCategory, subOption));
+                    pluginInstance->transformCluster();
+                }
+            );
+        }
+
+    }
+
+    // --- Point Split Actions ---
+    for (const auto& optionType : pointOptionTypes) {
+        const QString& mainCategory = optionType.first;
+        for (const auto& subOption : optionType.second) {
+            QString firstCopy = mainCategory, subCopy = subOption;
+            firstCopy.replace("/", " ");
+            subCopy.replace("/", " ");
+            const QString actionName = QString("GradientSurfer_Point_Split/%1/%2").arg(firstCopy, subCopy);
+
+            pluginTriggerActions << makeAction(
+                actionName,
+                QString("Perform %1 (%2) data transformation").arg(mainCategory, subOption),
+                QIcon::fromTheme("object-ungroup"),
+                [this, datasetMain, mainCategory, subOption](mv::gui::PluginTriggerAction&) {
+                    auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                    pluginInstance->setInputDataset(datasetMain);
+                    pluginInstance->setType(QString("PointSplit==>%1-->%2").arg(mainCategory, subOption));
+                    pluginInstance->transformPoint();
+                }
+            );
+        }
+    }
+
+    // --- Remove Zero Columns Action ---
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Remove_Zero_Columns",
+        "Remove all columns with all row values equal to 0",
+        QIcon::fromTheme("edit-delete-column"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->transformRemoveZeroColumns();
+        }
+    );
 
     return pluginTriggerActions;
 }
 
-void LayerSurferTransformationPlugin::createDatasets()
+void GradientSurferTransformationPlugin::createDatasets()
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
@@ -1082,8 +1287,9 @@ void LayerSurferTransformationPlugin::createDatasets()
 
     // Construct a descriptive name for the new dataset
     QString newDatasetName = QString::number(_transformationNumber) +"." 
-        //+ inputPointsDataset->getGuiName() + "/" 
-        + _datasetNameSelection + "/" + _splitNameSelection;
+        + inputPointsDataset->getGuiName() + "/" 
+        //+ _datasetNameSelection + "/" 
+        + _splitNameSelection;
 
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
@@ -1124,8 +1330,8 @@ void LayerSurferTransformationPlugin::createDatasets()
             );*/
             Dataset<Points> childClusterPoints = mv::data().createDerivedDataset(
                 //clusterPointsDataset->getGuiName() + "/" + 
-                QString::number(_transformationNumber) + "."+
-                _splitNameSelection+"/" +
+                //QString::number(_transformationNumber) + "."+
+                //_splitNameSelection+"/" +
                 child->getGuiName(),
                 clusterPointsDataset
             );
@@ -1156,8 +1362,8 @@ void LayerSurferTransformationPlugin::createDatasets()
             Dataset<Clusters> childClusterDataset = mv::data().createDataset(
                 "Cluster",
                 //clusterPointsDataset->getGuiName() + "/" +
-                QString::number(_transformationNumber) + "." +
-                _splitNameSelection + "/" +
+                //QString::number(_transformationNumber) + "." +
+                //_splitNameSelection + "/" +
                 child->getGuiName(),
                 clusterPointsDataset
             );
