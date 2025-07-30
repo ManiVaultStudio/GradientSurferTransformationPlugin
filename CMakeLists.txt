@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.22)
 option(MV_UNITY_BUILD "Combine target source files into batches for faster compilation" OFF)
 
 # -----------------------------------------------------------------------------
-# LayerSurferTransformation Plugin
+# GradientSurferTransformation Plugin
 # -----------------------------------------------------------------------------
-PROJECT("LayerSurferTransformationPlugin" LANGUAGES CXX)
+PROJECT("GradientSurferTransformationPlugin" LANGUAGES CXX)
 
 # -----------------------------------------------------------------------------
 # CMake Options
@@ -34,11 +34,11 @@ find_package(ManiVault COMPONENTS Core PointData ClusterData CONFIG QUIET)
 # -----------------------------------------------------------------------------
 # Define the plugin sources
 set(PLUGIN_SOURCES
-    src/LayerSurferTransformationPlugin.h
-    src/LayerSurferTransformationPlugin.cpp
-    src/LayerSurferTransformationDialogs.h
-    src/LayerSurferTransformationUtils.h
-    src/LayerSurferTransformationUtils.cpp
+    src/GradientSurferTransformationPlugin.h
+    src/GradientSurferTransformationPlugin.cpp
+    src/GradientSurferTransformationDialogs.h
+    src/GradientSurferTransformationUtils.h
+    src/GradientSurferTransformationUtils.cpp
     PluginInfo.json
 )
 
@@ -98,7 +98,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 
 # Append plugin version to output file
 # 0 disables automatic folder placement (same as plugin type)
-# since we want to place all layerSurfer plugins in a separate folder
+# since we want to place all GradientSurfer plugins in a separate folder
 mv_handle_plugin_config(${PROJECT_NAME}) 
 
 # -----------------------------------------------------------------------------

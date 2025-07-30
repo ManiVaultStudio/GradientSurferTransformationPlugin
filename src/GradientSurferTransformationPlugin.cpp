@@ -1,6 +1,6 @@
-#include "LayerSurferTransformationPlugin.h"
-#include "LayerSurferTransformationDialogs.h"
-#include "LayerSurferTransformationUtils.h"
+#include "GradientSurferTransformationPlugin.h"
+#include "GradientSurferTransformationDialogs.h"
+#include "GradientSurferTransformationUtils.h"
 
 #include <QDebug>
 #include <QtCore>
@@ -11,12 +11,12 @@
 #include <QApplication>
 
 
-Q_PLUGIN_METADATA(IID "studio.manivault.LayerSurferTransformationPlugin")
+Q_PLUGIN_METADATA(IID "studio.manivault.GradientSurferTransformationPlugin")
 
 using namespace mv;
 using namespace mv::util;
 
-LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFactory* factory) :
+GradientSurferTransformationPlugin::GradientSurferTransformationPlugin(const PluginFactory* factory) :
     TransformationPlugin(factory),
     _datasetNameSelection(""),
     _splitNameSelection(""),
@@ -26,12 +26,12 @@ LayerSurferTransformationPlugin::LayerSurferTransformationPlugin(const PluginFac
     qApp->setStyleSheet("QToolTip { color: black; background: #ffffe1; border: 1px solid black; }");
 }
 
-void LayerSurferTransformationPlugin::transform()
+void GradientSurferTransformationPlugin::transform()
 {
 
 }
 
-void LayerSurferTransformationPlugin::transformPoint()
+void GradientSurferTransformationPlugin::transformPoint()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
     if (!points.isValid())
@@ -60,7 +60,7 @@ void LayerSurferTransformationPlugin::transformPoint()
 
 }
 
-void LayerSurferTransformationPlugin::transformDimensionRemove()
+void GradientSurferTransformationPlugin::transformDimensionRemove()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -83,7 +83,7 @@ void LayerSurferTransformationPlugin::transformDimensionRemove()
 
 }
 
-void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
+void GradientSurferTransformationPlugin::transformMultiDatasetRowNormalize()
 {
     // Proceed with row normalization
     mv::Datasets allDatasetsForNormalization = getInputDatasets();
@@ -246,7 +246,7 @@ void LayerSurferTransformationPlugin::transformMultiDatasetRowNormalize()
     }
 }
 
-void LayerSurferTransformationPlugin::transformRowNormalize()
+void GradientSurferTransformationPlugin::transformRowNormalize()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -268,7 +268,7 @@ void LayerSurferTransformationPlugin::transformRowNormalize()
 }
 
 
-void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
+void GradientSurferTransformationPlugin::transformRemoveZeroColumns()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
     if (!points.isValid())
@@ -283,7 +283,7 @@ void LayerSurferTransformationPlugin::transformRemoveZeroColumns()
 
 }
 
-void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -398,7 +398,7 @@ void LayerSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& poi
     qDebug() << "Transforming dataset finished";
 }
 
-void LayerSurferTransformationPlugin::transformCluster()
+void GradientSurferTransformationPlugin::transformCluster()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
 
@@ -436,7 +436,7 @@ void LayerSurferTransformationPlugin::transformCluster()
 
 }
 
-void LayerSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     ExtractByClusterSubstringDialog dialog;
     if (dialog.exec() != QDialog::Accepted) {
@@ -518,7 +518,7 @@ void LayerSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Points
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
@@ -591,7 +591,7 @@ void LayerSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Dataset<
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     FunctionTimer timer(Q_FUNC_INFO);
     _pointsSplitDataset = nullptr;
@@ -745,7 +745,7 @@ void LayerSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Point
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -870,7 +870,7 @@ void LayerSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& points,
 }
 
 
-void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
     QStringList dimensionNames;
@@ -971,7 +971,7 @@ void LayerSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& poin
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+void GradientSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
@@ -1026,7 +1026,7 @@ void LayerSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Datase
     datasetTask.setFinished();
 }
 
-void LayerSurferTransformationPlugin::setType(const QString& type)
+void GradientSurferTransformationPlugin::setType(const QString& type)
 {
     // Split by "=>"
     QStringList transformationTypeExtract = type.split("==>");
@@ -1054,11 +1054,11 @@ void LayerSurferTransformationPlugin::setType(const QString& type)
 // Plugin Factory 
 // =============================================================================
 
-LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
+GradientSurferTransformationPluginFactory::GradientSurferTransformationPluginFactory()
 {
     setIconByName("barcode");
-	getPluginMetadata().setDescription("LayerSurfer transformation plugin");
-    getPluginMetadata().setSummary("This layerSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
+	getPluginMetadata().setDescription("GradientSurfer transformation plugin");
+    getPluginMetadata().setSummary("This GradientSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
     getPluginMetadata().setCopyrightHolder({ "BioVault (Biomedical Visual Analytics Unit LUMC - TU Delft)" });
     getPluginMetadata().setAuthors({
     });
@@ -1069,23 +1069,23 @@ LayerSurferTransformationPluginFactory::LayerSurferTransformationPluginFactory()
     getPluginMetadata().setLicenseText("This plugin is distributed under the [LGPL v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html) license.");
 }
 
-LayerSurferTransformationPlugin* LayerSurferTransformationPluginFactory::produce()
+GradientSurferTransformationPlugin* GradientSurferTransformationPluginFactory::produce()
 {
-    // Return a new instance of the layerSurfer transformation plugin
-    return new LayerSurferTransformationPlugin(this);
+    // Return a new instance of the GradientSurfer transformation plugin
+    return new GradientSurferTransformationPlugin(this);
 }
 
-mv::DataTypes LayerSurferTransformationPluginFactory::supportedDataTypes() const
+mv::DataTypes GradientSurferTransformationPluginFactory::supportedDataTypes() const
 {
     DataTypes supportedTypes;
 
-    // This layerSurfer transformation plugin is compatible with points datasets
+    // This GradientSurfer transformation plugin is compatible with points datasets
     supportedTypes.append(PointType);
 
     return supportedTypes;
 }
 
-mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginTriggerActions(const mv::Datasets& datasets) const
+mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPluginTriggerActions(const mv::Datasets& datasets) const
 {
     mv::gui::PluginTriggerActions pluginTriggerActions;
     const auto numberOfDatasets = datasets.count();
@@ -1097,7 +1097,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     if (numberOfDatasets > 1) {
         auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
             return new mv::gui::PluginTriggerAction(
-                const_cast<LayerSurferTransformationPluginFactory*>(this),
+                const_cast<GradientSurferTransformationPluginFactory*>(this),
                 this,
                 name,
                 desc,
@@ -1107,11 +1107,11 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             };
 
         pluginTriggerActions << makeAction(
-            "LayerSurfer_Multi-Dataset_Point_Normalize",
+            "GradientSurfer_Multi-Dataset_Point_Normalize",
             "Perform multi dataset normalize rows data transformation",
             QIcon::fromTheme("calculator"),
             [this, datasets](mv::gui::PluginTriggerAction&) {
-                auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
                 pluginInstance->setInputDatasets(datasets);
                 pluginInstance->setType("MultiDatasetPointNormalize==>");
                 pluginInstance->transformMultiDatasetRowNormalize();
@@ -1130,7 +1130,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     // --- Helper lambdas for action creation ---
     auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
         return new mv::gui::PluginTriggerAction(
-            const_cast<LayerSurferTransformationPluginFactory*>(this),
+            const_cast<GradientSurferTransformationPluginFactory*>(this),
             this,
             name,
             desc,
@@ -1141,11 +1141,11 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
 
     // --- Dimension Remove Action ---
     pluginTriggerActions << makeAction(
-        "LayerSurfer_Dimension_Remove",
+        "GradientSurfer_Dimension_Remove",
         "Perform dimension removal data transformation",
         QIcon::fromTheme("trash"),
         [this, datasetMain](mv::gui::PluginTriggerAction&) {
-            auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->setType("DimensionRemove==>");
             pluginInstance->transformDimensionRemove();
@@ -1154,11 +1154,11 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
 
     // --- Normalize Rows Action ---
     pluginTriggerActions << makeAction(
-        "LayerSurfer_Point_Normalize",
+        "GradientSurfer_Point_Normalize",
         "Perform normalize rows data transformation",
         QIcon::fromTheme("calculator"),
         [this, datasetMain](mv::gui::PluginTriggerAction&) {
-            auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->setType("PointNormalize==>");
             pluginInstance->transformRowNormalize();
@@ -1206,14 +1206,14 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             QString firstCopy = mainCategory, subCopy = subOption;
             firstCopy.replace("/", " ");
             subCopy.replace("/", " ");
-            const QString actionName = QString("LayerSurfer_Cluster_Split/%1/%2").arg(firstCopy, subCopy);
+            const QString actionName = QString("GradientSurfer_Cluster_Split/%1/%2").arg(firstCopy, subCopy);
 
             pluginTriggerActions << makeAction(
                 actionName,
                 QString("Perform %1 (%2) data transformation").arg(mainCategory, subOption),
                 QIcon::fromTheme("object-ungroup"),
                 [this, datasetMain, mainCategory, subOption](mv::gui::PluginTriggerAction&) {
-                    auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                    auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
                     pluginInstance->setInputDataset(datasetMain);
                     pluginInstance->setType(QString("ClusterSplit==>%1-->%2").arg(mainCategory, subOption));
                     pluginInstance->transformCluster();
@@ -1230,14 +1230,14 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
             QString firstCopy = mainCategory, subCopy = subOption;
             firstCopy.replace("/", " ");
             subCopy.replace("/", " ");
-            const QString actionName = QString("LayerSurfer_Point_Split/%1/%2").arg(firstCopy, subCopy);
+            const QString actionName = QString("GradientSurfer_Point_Split/%1/%2").arg(firstCopy, subCopy);
 
             pluginTriggerActions << makeAction(
                 actionName,
                 QString("Perform %1 (%2) data transformation").arg(mainCategory, subOption),
                 QIcon::fromTheme("object-ungroup"),
                 [this, datasetMain, mainCategory, subOption](mv::gui::PluginTriggerAction&) {
-                    auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                    auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
                     pluginInstance->setInputDataset(datasetMain);
                     pluginInstance->setType(QString("PointSplit==>%1-->%2").arg(mainCategory, subOption));
                     pluginInstance->transformPoint();
@@ -1248,11 +1248,11 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
 
     // --- Remove Zero Columns Action ---
     pluginTriggerActions << makeAction(
-        "LayerSurfer_Remove_Zero_Columns",
+        "GradientSurfer_Remove_Zero_Columns",
         "Remove all columns with all row values equal to 0",
         QIcon::fromTheme("edit-delete-column"),
         [this, datasetMain](mv::gui::PluginTriggerAction&) {
-            auto pluginInstance = dynamic_cast<LayerSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->transformRemoveZeroColumns();
         }
@@ -1261,7 +1261,7 @@ mv::gui::PluginTriggerActions LayerSurferTransformationPluginFactory::getPluginT
     return pluginTriggerActions;
 }
 
-void LayerSurferTransformationPlugin::createDatasets()
+void GradientSurferTransformationPlugin::createDatasets()
 {
     // Timer for profiling function execution time
     FunctionTimer timer(Q_FUNC_INFO);
