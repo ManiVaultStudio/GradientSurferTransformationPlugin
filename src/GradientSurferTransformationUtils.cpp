@@ -4,9 +4,14 @@
 #include <windows.h>
 #undef max
 #undef min
-#else
+#elif defined(__linux__)
 #include <sys/sysinfo.h>
+#elif defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <mach/mach.h>
 #endif
+
 
 FunctionTimer::FunctionTimer(const QString& functionName)
     : _functionName(functionName)
@@ -29,32 +34,33 @@ RamInfo getSystemRamInfo() {
         info.available = static_cast<std::uint64_t>(statex.ullAvailPhys);
         info.total = static_cast<std::uint64_t>(statex.ullTotalPhys);
     }
-#else
+#elif defined(__linux__)
     struct sysinfo memInfo;
     if (sysinfo(&memInfo) == 0) {
         info.available = static_cast<std::uint64_t>(memInfo.freeram) * memInfo.mem_unit;
         info.total = static_cast<std::uint64_t>(memInfo.totalram) * memInfo.mem_unit;
     }
+#elif defined(__APPLE__)
+    // Get total RAM
+    int mib[2] = { CTL_HW, HW_MEMSIZE };
+    int64_t total_memory = 0;
+    size_t length = sizeof(total_memory);
+    if (sysctl(mib, 2, &total_memory, &length, NULL, 0) == 0) {
+        info.total = static_cast<std::uint64_t>(total_memory);
+    }
+    // Get available RAM
+    mach_port_t host_port = mach_host_self();
+    vm_size_t page_size;
+    vm_statistics64_data_t vm_stats;
+    mach_msg_type_number_t count = sizeof(vm_stats) / sizeof(natural_t);
+    if (host_page_size(host_port, &page_size) == KERN_SUCCESS &&
+        host_statistics64(host_port, HOST_VM_INFO,
+            reinterpret_cast<host_info64_t>(&vm_stats), &count) == KERN_SUCCESS) {
+        info.available = static_cast<std::uint64_t>(vm_stats.free_count) * page_size;
+    }
 #endif
     return info;
 }
-
-std::uint64_t getAvailableRAM() {
-    RamInfo info = getSystemRamInfo();
-    return info.available;
-}
-
-/*inline bool isBinaryVector(const std::vector<float>& data, float epsilon = 1e-6f)
-{
-    const float* ptr = data.data();
-    const float* end = ptr + data.size();
-    for (; ptr != end; ++ptr) {
-        float v = *ptr;
-        if (!(std::abs(v - 0.0f) < epsilon || std::abs(v - 1.0f) < epsilon))
-            return false;
-    }
-    return true;
-}*/
 
 void normalizeVector(std::vector<float>& data, const std::string& method, float minVal, float maxVal, float norm, float mean, float stddev, float maxAbs, float scale) {
     if (method == "L2") {

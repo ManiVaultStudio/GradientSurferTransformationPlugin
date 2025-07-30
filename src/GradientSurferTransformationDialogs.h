@@ -129,7 +129,7 @@ public:
 
 private:
     void updateInfoLabel() {
-        int selected = valueList->selectedItems().size();
+        int selected = static_cast<int>(valueList->selectedItems().size());
         int total = valueList->count();
         infoLabel->setText(
             QString("Selected: %1    Not selected: %2    Total: %3")
@@ -275,7 +275,7 @@ public:
 
 private:
     void updateInfoLabel() {
-        int selected = dimensionList->selectedItems().size();
+        int selected = static_cast<int>(dimensionList->selectedItems().size());
         int total = 0;
         // Count visible items for not selected
         for (int i = 0; i < dimensionList->count(); ++i)
