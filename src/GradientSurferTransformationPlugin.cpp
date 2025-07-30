@@ -409,12 +409,12 @@ void GradientSurferTransformationPlugin::transformCluster()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
+    //datasetTask.setRunning();
  
     if (_datasetNameSelection.isEmpty()|| _splitNameSelection.isEmpty())
     {
         datasetTask.setProgressDescription("No transformation selected");
-        datasetTask.setFinished();
+        //datasetTask.setFinished();
         return;
     }
     datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _datasetNameSelection, _splitNameSelection));
@@ -445,7 +445,7 @@ void GradientSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Poi
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     const QStringList substrings = dialog.enteredSubstrings();
     const QString dtype = dialog.selectedDataType();
 
@@ -526,7 +526,7 @@ void GradientSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Datas
     _clustersSplitDataset = nullptr;
     _splitIndicesMap.clear();
     _splitIndices.clear();
-
+    datasetTask.setRunning();
     bool foundClustersSplitDatas = false;
     int totalClusters = 0;
     int processedClusters = 0;
@@ -979,7 +979,7 @@ void GradientSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dat
     _clustersSplitDataset = nullptr;
     _splitIndicesMap.clear();
     _splitIndices.clear();
-
+    datasetTask.setRunning();
     datasetTask.setProgress(0.0f);
     datasetTask.setProgressDescription("Searching for selected cluster...");
 
@@ -1286,11 +1286,15 @@ void GradientSurferTransformationPlugin::createDatasets()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = QString::number(_transformationNumber) +"." 
-        + inputPointsDataset->getGuiName() + "/" 
+    QString newDatasetName = 
+        //QString::number(_transformationNumber) +"." + 
+        inputPointsDataset->getGuiName() + "||" 
         //+ _datasetNameSelection + "/" 
         + _splitNameSelection;
-
+    int groupID = inputPointsDataset->getGroupIndex();
+    if(groupID >= 0) {
+        groupID = 10 * groupID +  _transformationNumber;
+    }
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
     events().notifyDatasetAdded(clusterPointsDataset);
@@ -1301,7 +1305,9 @@ void GradientSurferTransformationPlugin::createDatasets()
     clusterPointsDataset->setData(clusterPointsData.data(), _splitIndices.size(), numDimensions);
     clusterPointsDataset->setDimensionNames(dimensionNames);
     datasetsToNotify.push_back(clusterPointsDataset);
-
+    if(groupID >= 0) {
+        clusterPointsDataset->setGroupIndex(groupID);
+    }
 
     qDebug() << "Step 1 - Finished processing main Points dataset";
 
@@ -1332,11 +1338,15 @@ void GradientSurferTransformationPlugin::createDatasets()
                 //clusterPointsDataset->getGuiName() + "/" + 
                 //QString::number(_transformationNumber) + "."+
                 //_splitNameSelection+"/" +
-                child->getGuiName(),
+                clusterPointsDataset->getGuiName() + "||" +
+                child->getGuiName() ,
                 clusterPointsDataset
             );
-            events().notifyDatasetAdded(childClusterPoints);
 
+            events().notifyDatasetAdded(childClusterPoints);
+            if (groupID >= 0) {
+                childClusterPoints->setGroupIndex(groupID);
+            }
             int childNumDimensions = fullChildPoints->getNumDimensions();
             std::vector<int> childDimensionIndices(childNumDimensions);
             std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
@@ -1364,11 +1374,14 @@ void GradientSurferTransformationPlugin::createDatasets()
                 //clusterPointsDataset->getGuiName() + "/" +
                 //QString::number(_transformationNumber) + "." +
                 //_splitNameSelection + "/" +
+                clusterPointsDataset->getGuiName() + "||" +
                 child->getGuiName(),
                 clusterPointsDataset
             );
             events().notifyDatasetAdded(childClusterDataset);
-
+            if (groupID >= 0) {
+                childClusterDataset->setGroupIndex(groupID);
+            }
             // For each cluster in the child, remap indices to the new cluster subset
             for (const auto& cluster : fullChildClusters->getClusters()) {
                 std::vector<std::seed_seq::result_type> remappedIndices;

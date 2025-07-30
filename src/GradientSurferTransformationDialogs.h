@@ -457,6 +457,10 @@ public:
         substringList = new QListWidget(this);
         substringList->setSelectionMode(QAbstractItemView::SingleSelection);
         layout->addWidget(substringList);
+        //substringList->addItem("Human");
+        //substringList->addItem("Macaque");
+        //substringList->addItem("Marmoset");
+
 
         // Remove button
         QPushButton* removeButton = new QPushButton("Remove Selected", this);
@@ -467,7 +471,7 @@ public:
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
         floatRadio = new QRadioButton("float", this);
-        floatRadio->setChecked(true);
+        bfloat16Radio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
         dtypeGroup->setLayout(dtypeLayout);
