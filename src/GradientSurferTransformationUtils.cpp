@@ -94,6 +94,12 @@ void normalizeVector(std::vector<float>& data, const std::string& method, float 
     else if (method == "Log1p") {
         for (float& v : data) v = std::log1p(std::max(v, 0.0f));
     }
+    else if (method == "Log") {
+        for (float& v : data) v = std::log(std::max(v, 1e-6f));
+    }
+    else if (method == "Log10") {
+        for (float& v : data) v = std::log10(std::max(v, 1e-6f));
+    }
     else if (method == "CPM") {
         float sum = std::accumulate(data.begin(), data.end(), 0.0f);
         if (sum < 1e-8f) sum = 1.0f;

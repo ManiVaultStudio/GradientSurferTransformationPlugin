@@ -327,6 +327,8 @@ public:
         methodCombo->addItem("Decimal Scaling");
         methodCombo->addItem("MaxAbs");
         methodCombo->addItem("Log1p");
+        methodCombo->addItem("Log10");
+        methodCombo->addItem("Log");
         methodCombo->addItem("CPM");
         methodCombo->addItem("CPM_Log1p");
         methodCombo->addItem("CPM_Log1p_ZScore");
