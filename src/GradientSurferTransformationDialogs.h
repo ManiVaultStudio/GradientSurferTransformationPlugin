@@ -647,17 +647,6 @@ public:
         dtypeGroup->setLayout(dtypeLayout);
         layout->addWidget(dtypeGroup);
 
-        // --- Output mode radio buttons ---
-        QGroupBox* outputGroup = new QGroupBox("Output Mode", this);
-        QHBoxLayout* outputLayout = new QHBoxLayout(outputGroup);
-        inplaceRadio = new QRadioButton("Inplace", this);
-        newRadio = new QRadioButton("New Dataset", this);
-        inplaceRadio->setChecked(true); // Default: inplace
-        outputLayout->addWidget(inplaceRadio);
-        outputLayout->addWidget(newRadio);
-        outputGroup->setLayout(outputLayout);
-        layout->addWidget(outputGroup);
-
         // --- Column keep mode radio buttons ---
         QGroupBox* keepColsGroup = new QGroupBox("Column Merge Mode", this);
         QVBoxLayout* keepColsLayout = new QVBoxLayout(keepColsGroup);
@@ -669,41 +658,11 @@ public:
         keepColsGroup->setLayout(keepColsLayout);
         layout->addWidget(keepColsGroup);
 
-        // --- Only keep found rows checkbox ---
-        onlyKeepFoundRowsCheck = new QCheckBox("Only keep found rows", this);
-        onlyKeepFoundRowsCheck->setChecked(true); // Default: checked
-        layout->addWidget(onlyKeepFoundRowsCheck);
-
         // --- OK/Cancel buttons ---
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
-
-        // --- Logic for output mode and only keep found rows ---
-        auto updateOnlyKeepFoundRowsState = [this]() {
-            if (inplaceRadio->isChecked()) {
-                onlyKeepFoundRowsCheck->setChecked(false);
-                onlyKeepFoundRowsCheck->setEnabled(false);
-            }
-            else {
-                onlyKeepFoundRowsCheck->setEnabled(true);
-            }
-            };
-        connect(inplaceRadio, &QRadioButton::toggled, this, updateOnlyKeepFoundRowsState);
-        connect(newRadio, &QRadioButton::toggled, this, updateOnlyKeepFoundRowsState);
-
-        // If user checks "only keep found rows", force "New Dataset" and uncheck "Inplace"
-        connect(onlyKeepFoundRowsCheck, &QCheckBox::toggled, this, [this](bool checked) {
-            if (checked) {
-                if (inplaceRadio->isChecked()) {
-                    newRadio->setChecked(true);
-                }
-            }
-            });
-
-        // Initialize state
-        updateOnlyKeepFoundRowsState();
     }
 
     // Dataset ID getters
@@ -732,11 +691,8 @@ public:
         if (bfloat16Radio->isChecked()) return "bfloat16";
         return "float";
     }
-    bool isInplace() const { return inplaceRadio->isChecked(); }
-    bool isNewDataset() const { return newRadio->isChecked(); }
     bool keepBothColumns() const { return keepBothRadio->isChecked(); }
     bool keepFromColumnsOnly() const { return keepFromRadio->isChecked(); }
-    bool onlyKeepFoundRows() const { return onlyKeepFoundRowsCheck->isChecked(); }
 
 private:
     // Dataset selection
@@ -757,9 +713,6 @@ private:
     // Other options
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
-    QRadioButton* inplaceRadio;
-    QRadioButton* newRadio;
     QRadioButton* keepBothRadio;
     QRadioButton* keepFromRadio;
-    QCheckBox* onlyKeepFoundRowsCheck;
 };

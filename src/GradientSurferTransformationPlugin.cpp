@@ -161,9 +161,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
     QString toClusterId = dialog.selectedToClusterId();
     QString fromClusterId = dialog.selectedFromClusterId();
     QString dtype = dialog.selectedDataType();
-    bool inplace = dialog.isInplace();
     bool keepBoth = dialog.keepBothColumns();
-    bool onlyKeepFoundRows = dialog.onlyKeepFoundRows();
 
     mv::Dataset<Points> toDataset = mv::data().getDataset<Points>(toDatasetId);
     mv::Dataset<Points> fromDataset = mv::data().getDataset<Points>(fromDatasetId);
@@ -214,8 +212,13 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
         for (const auto& cluster : fromClustersVec) {
             auto clusterName = cluster.getName();
             const auto& indices = cluster.getIndices();
-            if (!clusterName.isEmpty() && indices.size() == 1) {
-                fromClusterNameToIndex[clusterName] = indices[0];
+            if (!clusterName.isEmpty()) {
+                if (indices.size() == 1) {
+                    fromClusterNameToIndex[clusterName] = indices[0];
+                }
+                else {
+                    //qWarning() << "Cluster" << clusterName << "in 'from' dataset has" << indices.size() << "points. Only singleton clusters are supported for merging.";
+                }
             }
         }
     }
@@ -242,25 +245,30 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
                 mappedPointIndicesTo.push_back(i);
                 mappedPointIndicesFrom.push_back(it->second);
             }
-            else if (!onlyKeepFoundRows || !inplace) {
-                // If not only keeping found rows, still keep the "to" row (with no "from" match)
-                mappedPointIndicesTo.push_back(i);
-                mappedPointIndicesFrom.push_back(-1); // Mark as missing
-            }
         }
     }
 
-    if (mappedPointIndicesTo.empty() || (onlyKeepFoundRows && inplace && mappedPointIndicesTo.size() < static_cast<size_t>(numPointsTo))) {
+    //remove missing rows if onlyKeepFoundRows is true and inplace is true
+
+    if (mappedPointIndicesTo.empty() || mappedPointIndicesFrom.empty() || mappedPointIndicesFrom.size()!= mappedPointIndicesTo.size()) {
         qWarning() << "Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.";
         datasetTask.setProgressDescription("Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.");
         datasetTask.setProgress(1.0f);
         datasetTask.setFinished();
         return;
     }
+    int mappedIndicesSize = static_cast<int>(mappedPointIndicesTo.size());
+    if (mappedIndicesSize == 0) {
+        qWarning() << "No matching rows found between the two datasets, cannot merge.";
+        datasetTask.setProgressDescription("No matching rows found between the two datasets, cannot merge.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
 
     // Prepare data for merging
-    std::vector<float> dataTo(numPointsTo * numDimsTo, 0.0f);
-    std::vector<float> dataFrom(numPointsFrom * numDimsFrom, 0.0f);
+    std::vector<float> dataTo(mappedIndicesSize * numDimsTo, 0.0f);
+    std::vector<float> dataFrom(mappedIndicesSize * numDimsFrom, 0.0f);
     std::vector<float> mergedData;
     std::vector<int> dimensionIndicesTo(numDimsTo), dimensionIndicesFrom(numDimsFrom);
     std::iota(dimensionIndicesTo.begin(), dimensionIndicesTo.end(), 0);
@@ -268,33 +276,32 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
     auto dimensionNamesTo = toDataset->getDimensionNames();
     auto dimensionNamesFrom = fromDataset->getDimensionNames();
 
-    toDataset->populateDataForDimensions(dataTo, dimensionIndicesTo);
-    fromDataset->populateDataForDimensions(dataFrom, dimensionIndicesFrom);
+    
+    fromDataset->populateDataForDimensions(dataFrom, dimensionIndicesFrom, mappedPointIndicesFrom);
 
     // Merge data
     if (keepBoth) {
+        toDataset->populateDataForDimensions(dataTo, dimensionIndicesTo, mappedPointIndicesTo);
+
         mergedData.resize(mappedPointIndicesTo.size() * (numDimsTo + numDimsFrom), 0.0f);
+
+
         for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
-            int idxTo = mappedPointIndicesTo[i];
-            int idxFrom = mappedPointIndicesFrom[i];
             // Copy "to" data
             for (int j = 0; j < numDimsTo; ++j) {
-                mergedData[i * (numDimsTo + numDimsFrom) + j] = dataTo[idxTo * numDimsTo + j];
+                mergedData[i * (numDimsTo + numDimsFrom) + j] = dataTo[i * numDimsTo + j];
             }
-            // Copy "from" data if available, else fill with 0
-            if (idxFrom >= 0) {
-                for (int j = 0; j < numDimsFrom; ++j) {
-                    mergedData[i * (numDimsTo + numDimsFrom) + (numDimsTo + j)] = dataFrom[idxFrom * numDimsFrom + j];
-                }
+            // Copy "from" data
+            for (int j = 0; j < numDimsFrom; ++j) {
+                mergedData[i * (numDimsTo + numDimsFrom) + (numDimsTo + j)] = dataFrom[i * numDimsFrom + j];
             }
         }
     }
     else {
-        mergedData.resize(mappedPointIndicesTo.size() * numDimsTo, 0.0f);
+        mergedData.resize(mappedPointIndicesTo.size() * numDimsFrom, 0.0f);
         for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
-            int idxTo = mappedPointIndicesTo[i];
-            for (int j = 0; j < numDimsTo; ++j) {
-                mergedData[i * numDimsTo + j] = dataTo[idxTo * numDimsTo + j];
+            for (int j = 0; j < numDimsFrom; ++j) {
+                mergedData[i * numDimsFrom + j] = dataFrom[i * numDimsFrom + j];
             }
         }
     }
@@ -307,23 +314,24 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
         mergedDimensionNames.insert(mergedDimensionNames.end(), dimensionNamesFrom.begin(), dimensionNamesFrom.end());
     }
     else {
-        mergedDimensionNames = dimensionNamesTo;
+        mergedDimensionNames = dimensionNamesFrom;
     }
 
     // Output: inplace or new dataset
-    int outNumRows = static_cast<int>(mappedPointIndicesTo.size());
+    
     int outNumDims = static_cast<int>(mergedDimensionNames.size());
-    if (!inplace) {
+
+    {
         QString newName = toDataset->getGuiName() + "/merged";
         Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
         if (dtype == "bfloat16") {
             std::vector<biovault::bfloat16_t> outData(mergedData.size());
             for (size_t i = 0; i < mergedData.size(); ++i)
                 outData[i] = static_cast<biovault::bfloat16_t>(mergedData[i]);
-            newPoints->setData(outData.data(), outNumRows, outNumDims);
+            newPoints->setData(outData.data(), mappedIndicesSize, outNumDims);
         }
         else {
-            newPoints->setData(mergedData.data(), outNumRows, outNumDims);
+            newPoints->setData(mergedData.data(), mappedIndicesSize, outNumDims);
         }
         newPoints->setDimensionNames(mergedDimensionNames);
         mv::events().notifyDatasetAdded(newPoints);
@@ -343,10 +351,10 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
                 std::vector<int> childDimensionIndices(childNumDimensions);
                 std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
                 // Prepare the output buffer for the child dataset
-                std::vector<float> childClusterData(outNumRows* childNumDimensions);
+                std::vector<float> childClusterData(mappedIndicesSize * childNumDimensions);
                 // Use mappedPointIndicesTo to select the correct rows from the child dataset
                 fullChildPoints->populateDataForDimensions(childClusterData, childDimensionIndices, mappedPointIndicesTo);
-                childClusterPoints->setData(childClusterData.data(), outNumRows, childNumDimensions);
+                childClusterPoints->setData(childClusterData.data(), mappedIndicesSize, childNumDimensions);
                 childClusterPoints->setDimensionNames(fullChildPoints->getDimensionNames());
                 mv::events().notifyDatasetAdded(childClusterPoints);
                 mv::events().notifyDatasetDataChanged(childClusterPoints);
@@ -359,14 +367,17 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
                     newPoints->getGuiName() + "||" + child->getGuiName(),
                     newPoints
                 );
-                // Remap cluster indices
+                std::unordered_map<int, int> toIndexToMergedIndex;
+                for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
+                    toIndexToMergedIndex[mappedPointIndicesTo[i]] = static_cast<int>(i);
+                }
                 for (const auto& cluster : fullChildClusters->getClusters()) {
                     std::vector<std::seed_seq::result_type> remappedIndices;
                     const auto& originalIndices = cluster.getIndices();
                     for (int idx : originalIndices) {
-                        auto it = std::find(mappedPointIndicesTo.begin(), mappedPointIndicesTo.end(), idx);
-                        if (it != mappedPointIndicesTo.end()) {
-                            remappedIndices.push_back(static_cast<int>(std::distance(mappedPointIndicesTo.begin(), it)));
+                        auto it = toIndexToMergedIndex.find(idx);
+                        if (it != toIndexToMergedIndex.end()) {
+                            remappedIndices.push_back(it->second);
                         }
                     }
                     Cluster remappedCluster = cluster;
@@ -378,21 +389,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
             }
         }
     }
-    else {
-        // inplace logic
-        if (dtype == "bfloat16") {
-            std::vector<biovault::bfloat16_t> outData(mergedData.size());
-            for (size_t i = 0; i < mergedData.size(); ++i)
-                outData[i] = static_cast<biovault::bfloat16_t>(mergedData[i]);
-            toDataset->setData(outData.data(), outNumRows, outNumDims);
-        }
-        else {
-            toDataset->setData(mergedData.data(), outNumRows, outNumDims);
-        }
-        toDataset->setDimensionNames(mergedDimensionNames);
-        mv::events().notifyDatasetAdded(toDataset);
-        mv::events().notifyDatasetDataChanged(toDataset);
-    }
+
 
     datasetTask.setProgressDescription("Merging complete for current datasets");
     datasetTask.setProgress(1.0f);
