@@ -15,6 +15,11 @@
 #include <QSet>
 #include <QStringList>
 
+struct DatasetClusterOptions {
+    QString datasetName;
+    QString datasetId;
+    QList<QPair<QString, QString>> clusterPrimaryKeyOptions; // (name, id)
+};
 // Custom dialog for transformation parameters, styled like RemoveDimensionsDialog
 class TransformationParamDialog : public QDialog {
     Q_OBJECT
@@ -327,6 +332,8 @@ public:
         methodCombo->addItem("Decimal Scaling");
         methodCombo->addItem("MaxAbs");
         methodCombo->addItem("Log1p");
+        methodCombo->addItem("Log10");
+        methodCombo->addItem("Log");
         methodCombo->addItem("CPM");
         methodCombo->addItem("CPM_Log1p");
         methodCombo->addItem("CPM_Log1p_ZScore");
@@ -455,6 +462,10 @@ public:
         substringList = new QListWidget(this);
         substringList->setSelectionMode(QAbstractItemView::SingleSelection);
         layout->addWidget(substringList);
+        substringList->addItem("Human");
+        substringList->addItem("Macaque");
+        substringList->addItem("Marmoset");
+
 
         // Remove button
         QPushButton* removeButton = new QPushButton("Remove Selected", this);
@@ -465,7 +476,7 @@ public:
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
         floatRadio = new QRadioButton("float", this);
-        floatRadio->setChecked(true);
+        bfloat16Radio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
         dtypeGroup->setLayout(dtypeLayout);
@@ -519,4 +530,189 @@ private:
     QListWidget* substringList;
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
+};
+
+class MergingRowsDialog : public QDialog {
+    Q_OBJECT
+public:
+    MergingRowsDialog(const DatasetClusterOptions& dataset1,
+        const DatasetClusterOptions& dataset2,
+        QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Merge Rows Between Datasets");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        // Store dataset IDs for later retrieval
+        _toDatasetId1 = dataset1.datasetId;
+        _toDatasetId2 = dataset2.datasetId;
+
+        layout->addWidget(new QLabel("Select 'To' and 'From' datasets:"));
+
+        // --- To Dataset selection and cluster key ---
+        QGroupBox* toGroup = new QGroupBox("To Dataset", this);
+        QVBoxLayout* toLayout = new QVBoxLayout(toGroup);
+        QString toLabel1 = QString("%1 [%2]").arg(dataset1.datasetName, dataset1.datasetId);
+        QString toLabel2 = QString("%1 [%2]").arg(dataset2.datasetName, dataset2.datasetId);
+        toRadio1 = new QRadioButton(toLabel1, this);
+        toRadio2 = new QRadioButton(toLabel2, this);
+        toRadio1->setChecked(true);
+        toLayout->addWidget(toRadio1);
+        toLayout->addWidget(toRadio2);
+
+        toClusterCombo1 = new QComboBox(this);
+        for (const auto& pair : dataset1.clusterPrimaryKeyOptions) {
+            toClusterCombo1->addItem(QString("%1 [%2]").arg(pair.first, pair.second), pair.second);
+        }
+        toClusterCombo2 = new QComboBox(this);
+        for (const auto& pair : dataset2.clusterPrimaryKeyOptions) {
+            toClusterCombo2->addItem(QString("%1 [%2]").arg(pair.first, pair.second), pair.second);
+        }
+
+        toLayout->addWidget(new QLabel("Cluster primary key:"));
+        toLayout->addWidget(toClusterCombo1);
+        toLayout->addWidget(toClusterCombo2);
+        toClusterCombo2->hide();
+
+        toGroup->setLayout(toLayout);
+        layout->addWidget(toGroup);
+
+        // --- From Dataset selection and cluster key ---
+        QGroupBox* fromGroup = new QGroupBox("From Dataset", this);
+        QVBoxLayout* fromLayout = new QVBoxLayout(fromGroup);
+        QString fromLabel1 = QString("%1 [%2]").arg(dataset1.datasetName, dataset1.datasetId);
+        QString fromLabel2 = QString("%1 [%2]").arg(dataset2.datasetName, dataset2.datasetId);
+        fromRadio1 = new QRadioButton(fromLabel1, this);
+        fromRadio2 = new QRadioButton(fromLabel2, this);
+        fromRadio2->setChecked(true);
+        fromLayout->addWidget(fromRadio1);
+        fromLayout->addWidget(fromRadio2);
+
+        fromClusterCombo1 = new QComboBox(this);
+        for (const auto& pair : dataset1.clusterPrimaryKeyOptions) {
+            fromClusterCombo1->addItem(QString("%1 [%2]").arg(pair.first, pair.second), pair.second);
+        }
+        fromClusterCombo2 = new QComboBox(this);
+        for (const auto& pair : dataset2.clusterPrimaryKeyOptions) {
+            fromClusterCombo2->addItem(QString("%1 [%2]").arg(pair.first, pair.second), pair.second);
+        }
+
+        fromLayout->addWidget(new QLabel("Cluster primary key:"));
+        fromLayout->addWidget(fromClusterCombo1);
+        fromLayout->addWidget(fromClusterCombo2);
+        fromClusterCombo1->hide();
+
+        fromGroup->setLayout(fromLayout);
+        layout->addWidget(fromGroup);
+
+        // --- Radio logic to ensure only one To/From and show correct cluster key ---
+        auto updateRadios = [this]() {
+            if (toRadio1->isChecked()) {
+                fromRadio1->setEnabled(false);
+                fromRadio2->setEnabled(true);
+                if (fromRadio1->isChecked()) fromRadio2->setChecked(true);
+                toClusterCombo1->show();
+                toClusterCombo2->hide();
+            }
+            else {
+                fromRadio2->setEnabled(false);
+                fromRadio1->setEnabled(true);
+                if (fromRadio2->isChecked()) fromRadio1->setChecked(true);
+                toClusterCombo1->hide();
+                toClusterCombo2->show();
+            }
+            if (fromRadio1->isChecked()) {
+                fromClusterCombo1->show();
+                fromClusterCombo2->hide();
+            }
+            else {
+                fromClusterCombo1->hide();
+                fromClusterCombo2->show();
+            }
+            };
+        connect(toRadio1, &QRadioButton::toggled, this, updateRadios);
+        connect(toRadio2, &QRadioButton::toggled, this, updateRadios);
+        connect(fromRadio1, &QRadioButton::toggled, this, updateRadios);
+        connect(fromRadio2, &QRadioButton::toggled, this, updateRadios);
+        updateRadios();
+
+        // --- Data type radio buttons ---
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        bfloat16Radio->setChecked(true); // Default: bfloat16
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        dtypeGroup->setLayout(dtypeLayout);
+        layout->addWidget(dtypeGroup);
+
+        // --- Column keep mode radio buttons ---
+        QGroupBox* keepColsGroup = new QGroupBox("Column Merge Mode", this);
+        QVBoxLayout* keepColsLayout = new QVBoxLayout(keepColsGroup);
+        keepBothRadio = new QRadioButton("Keep both dataset columns", this);
+        keepFromRadio = new QRadioButton("Only keep 'From Dataset' columns", this);
+        keepFromRadio->setChecked(true); // Default: only keep from dataset columns
+        keepColsLayout->addWidget(keepBothRadio);
+        keepColsLayout->addWidget(keepFromRadio);
+        keepColsGroup->setLayout(keepColsLayout);
+        layout->addWidget(keepColsGroup);
+
+        // --- OK/Cancel buttons ---
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+
+    // Dataset ID getters
+    QString selectedToDatasetId() const {
+        return toRadio1->isChecked() ? _toDatasetId1 : _toDatasetId2;
+    }
+    QString selectedFromDatasetId() const {
+        return fromRadio1->isChecked() ? _toDatasetId1 : _toDatasetId2;
+    }
+
+    // Cluster ID getters
+    QString selectedToClusterId() const {
+        if (toRadio1->isChecked())
+            return toClusterCombo1->currentData().toString();
+        else
+            return toClusterCombo2->currentData().toString();
+    }
+    QString selectedFromClusterId() const {
+        if (fromRadio1->isChecked())
+            return fromClusterCombo1->currentData().toString();
+        else
+            return fromClusterCombo2->currentData().toString();
+    }
+
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+    bool keepBothColumns() const { return keepBothRadio->isChecked(); }
+    bool keepFromColumnsOnly() const { return keepFromRadio->isChecked(); }
+
+private:
+    // Dataset selection
+    QRadioButton* toRadio1;
+    QRadioButton* toRadio2;
+    QRadioButton* fromRadio1;
+    QRadioButton* fromRadio2;
+
+    // Cluster key selection
+    QComboBox* toClusterCombo1;
+    QComboBox* toClusterCombo2;
+    QComboBox* fromClusterCombo1;
+    QComboBox* fromClusterCombo2;
+
+    // Store dataset IDs for retrieval
+    QString _toDatasetId1, _toDatasetId2;
+
+    // Other options
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
+    QRadioButton* keepBothRadio;
+    QRadioButton* keepFromRadio;
 };

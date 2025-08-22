@@ -82,6 +82,322 @@ void GradientSurferTransformationPlugin::transformDimensionRemove()
 
 
 }
+void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
+{
+    mv::Datasets allDatasetsForMapping = getInputDatasets();
+    if (allDatasetsForMapping.isEmpty()) {
+        qWarning() << "No datasets available for row normalization.";
+        return;
+    }
+
+    struct DatasetsTempMap {
+        std::map<QString, QString> clusterDatasetMap; // name -> id
+        std::pair<QString, QString> datasetMap;      // (name, id)
+    };
+
+    std::vector<DatasetsTempMap> datasetNameMap;
+    datasetNameMap.reserve(allDatasetsForMapping.size());
+
+    for (const mv::Dataset<Points>& points : allDatasetsForMapping) {
+        if (!points.isValid()) {
+            qWarning() << "Invalid dataset encountered, skipping.";
+            continue;
+        }
+
+        const auto& children = points->getChildren();
+        if (children.isEmpty()) {
+            qWarning() << "No child datasets found in" << points->getGuiName();
+            continue;
+        }
+
+        std::pair<QString, QString> datasetName{ points->getGuiName(), points->getId() };
+
+        std::map<QString, QString> clusterNames;
+        for (const mv::Dataset<Clusters>& child : children) {
+            if (child->getDataType() == ClusterType) {
+                clusterNames.emplace(child->getGuiName(), child->getId());
+            }
+        }
+
+        if (clusterNames.empty()) {
+            qWarning() << "No cluster datasets found in" << points->getGuiName();
+            continue;
+        }
+
+        if (datasetName.first.isEmpty() || datasetName.second.isEmpty()) {
+            qWarning() << "Dataset name or ID is empty for" << points->getGuiName();
+            continue;
+        }
+
+        datasetNameMap.emplace_back(DatasetsTempMap{ std::move(clusterNames), std::move(datasetName) });
+    }
+
+    if (datasetNameMap.size() < 2) {
+        qWarning() << "Need exactly two datasets with clusters for merging.";
+        return;
+    }
+
+    // Fill DatasetClusterOptions with both cluster names and IDs
+    DatasetClusterOptions options1, options2;
+    options1.datasetName = datasetNameMap[0].datasetMap.first;
+    options1.datasetId = datasetNameMap[0].datasetMap.second;
+    for (const auto& [name, id] : datasetNameMap[0].clusterDatasetMap) {
+        options1.clusterPrimaryKeyOptions.append(qMakePair(name, id));
+    }
+
+    options2.datasetName = datasetNameMap[1].datasetMap.first;
+    options2.datasetId = datasetNameMap[1].datasetMap.second;
+    for (const auto& [name, id] : datasetNameMap[1].clusterDatasetMap) {
+        options2.clusterPrimaryKeyOptions.append(qMakePair(name, id));
+    }
+
+    MergingRowsDialog dialog(options1, options2);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QString toDatasetId = dialog.selectedToDatasetId();
+    QString fromDatasetId = dialog.selectedFromDatasetId();
+    QString toClusterId = dialog.selectedToClusterId();
+    QString fromClusterId = dialog.selectedFromClusterId();
+    QString dtype = dialog.selectedDataType();
+    bool keepBoth = dialog.keepBothColumns();
+
+    mv::Dataset<Points> toDataset = mv::data().getDataset<Points>(toDatasetId);
+    mv::Dataset<Points> fromDataset = mv::data().getDataset<Points>(fromDatasetId);
+
+    if (!toDataset.isValid() || !fromDataset.isValid() ||
+        toDataset->getNumPoints() == 0 || fromDataset->getNumPoints() == 0) {
+        qWarning() << "Invalid or empty datasets selected for merging.";
+        return;
+    }
+
+    mv::Dataset<Clusters> toCluster = mv::data().getDataset<Clusters>(toClusterId);
+    mv::Dataset<Clusters> fromCluster = mv::data().getDataset<Clusters>(fromClusterId);
+
+    if (!toCluster.isValid() || !fromCluster.isValid() ||
+        toCluster->getClusterNames().empty() || fromCluster->getClusterNames().empty()) {
+        qWarning() << "Invalid or empty clusters selected for merging.";
+        return;
+    }
+
+    mv::DatasetTask& datasetTask = toDataset->getTask();
+    datasetTask.setName("Transforming");
+    datasetTask.setRunning();
+
+    datasetTask.setProgressDescription(
+        QString("Merging datasets %1 and %2")
+        .arg(toDataset->getGuiName(), fromDataset->getGuiName())
+    );
+
+    qDebug() << "Transforming dataset";
+
+    int numPointsTo = toDataset->getNumPoints();
+    int numPointsFrom = fromDataset->getNumPoints();
+    int numDimsTo = toDataset->getNumDimensions();
+    int numDimsFrom = fromDataset->getNumDimensions();
+
+    if (numDimsTo == 0 || numDimsFrom == 0) {
+        qWarning() << "One of the datasets has zero dimensions, cannot merge.";
+        datasetTask.setProgressDescription("One of the datasets has zero dimensions, cannot merge.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Build cluster name to point index map for fast lookup
+    std::unordered_map<QString, int> fromClusterNameToIndex;
+    {
+        const auto& fromClustersVec = fromCluster->getClusters();
+        for (const auto& cluster : fromClustersVec) {
+            auto clusterName = cluster.getName();
+            const auto& indices = cluster.getIndices();
+            if (!clusterName.isEmpty()) {
+                if (indices.size() == 1) {
+                    fromClusterNameToIndex[clusterName] = indices[0];
+                }
+                else {
+                    //qWarning() << "Cluster" << clusterName << "in 'from' dataset has" << indices.size() << "points. Only singleton clusters are supported for merging.";
+                }
+            }
+        }
+    }
+
+    std::vector<int> mappedPointIndicesTo;
+    std::vector<int> mappedPointIndicesFrom;
+    {
+        const auto& toClustersVec = toCluster->getClusters();
+        // Build a point index to cluster name map for "to"
+        std::vector<QString> toIndexToClusterName(numPointsTo, "");
+        for (const auto& cluster : toClustersVec) {
+            auto clusterName = cluster.getName();
+            const auto& indices = cluster.getIndices();
+            if (!clusterName.isEmpty() && indices.size() == 1) {
+                toIndexToClusterName[indices[0]] = clusterName;
+            }
+        }
+        // For each point in "to", find matching point in "from" by cluster name
+        for (int i = 0; i < numPointsTo; ++i) {
+            const QString& cname = toIndexToClusterName[i];
+            if (cname.isEmpty()) continue;
+            auto it = fromClusterNameToIndex.find(cname);
+            if (it != fromClusterNameToIndex.end()) {
+                mappedPointIndicesTo.push_back(i);
+                mappedPointIndicesFrom.push_back(it->second);
+            }
+        }
+    }
+
+    //remove missing rows if onlyKeepFoundRows is true and inplace is true
+
+    if (mappedPointIndicesTo.empty() || mappedPointIndicesFrom.empty() || mappedPointIndicesFrom.size()!= mappedPointIndicesTo.size()) {
+        qWarning() << "Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.";
+        datasetTask.setProgressDescription("Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    int mappedIndicesSize = static_cast<int>(mappedPointIndicesTo.size());
+    if (mappedIndicesSize == 0) {
+        qWarning() << "No matching rows found between the two datasets, cannot merge.";
+        datasetTask.setProgressDescription("No matching rows found between the two datasets, cannot merge.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Prepare data for merging
+    std::vector<float> dataTo(mappedIndicesSize * numDimsTo, 0.0f);
+    std::vector<float> dataFrom(mappedIndicesSize * numDimsFrom, 0.0f);
+    std::vector<float> mergedData;
+    std::vector<int> dimensionIndicesTo(numDimsTo), dimensionIndicesFrom(numDimsFrom);
+    std::iota(dimensionIndicesTo.begin(), dimensionIndicesTo.end(), 0);
+    std::iota(dimensionIndicesFrom.begin(), dimensionIndicesFrom.end(), 0);
+    auto dimensionNamesTo = toDataset->getDimensionNames();
+    auto dimensionNamesFrom = fromDataset->getDimensionNames();
+
+    
+    fromDataset->populateDataForDimensions(dataFrom, dimensionIndicesFrom, mappedPointIndicesFrom);
+
+    // Merge data
+    if (keepBoth) {
+        toDataset->populateDataForDimensions(dataTo, dimensionIndicesTo, mappedPointIndicesTo);
+
+        mergedData.resize(mappedPointIndicesTo.size() * (numDimsTo + numDimsFrom), 0.0f);
+
+
+        for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
+            // Copy "to" data
+            for (int j = 0; j < numDimsTo; ++j) {
+                mergedData[i * (numDimsTo + numDimsFrom) + j] = dataTo[i * numDimsTo + j];
+            }
+            // Copy "from" data
+            for (int j = 0; j < numDimsFrom; ++j) {
+                mergedData[i * (numDimsTo + numDimsFrom) + (numDimsTo + j)] = dataFrom[i * numDimsFrom + j];
+            }
+        }
+    }
+    else {
+        mergedData.resize(mappedPointIndicesTo.size() * numDimsFrom, 0.0f);
+        for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
+            for (int j = 0; j < numDimsFrom; ++j) {
+                mergedData[i * numDimsFrom + j] = dataFrom[i * numDimsFrom + j];
+            }
+        }
+    }
+
+    // Merge dimension names
+    std::vector<QString> mergedDimensionNames;
+    if (keepBoth) {
+        mergedDimensionNames.reserve(dimensionNamesTo.size() + dimensionNamesFrom.size());
+        mergedDimensionNames.insert(mergedDimensionNames.end(), dimensionNamesTo.begin(), dimensionNamesTo.end());
+        mergedDimensionNames.insert(mergedDimensionNames.end(), dimensionNamesFrom.begin(), dimensionNamesFrom.end());
+    }
+    else {
+        mergedDimensionNames = dimensionNamesFrom;
+    }
+
+    // Output: inplace or new dataset
+    
+    int outNumDims = static_cast<int>(mergedDimensionNames.size());
+
+    {
+        QString newName = toDataset->getGuiName() + "/merged";
+        Dataset<Points> newPoints = mv::data().createDataset("Points", newName);
+        if (dtype == "bfloat16") {
+            std::vector<biovault::bfloat16_t> outData(mergedData.size());
+            for (size_t i = 0; i < mergedData.size(); ++i)
+                outData[i] = static_cast<biovault::bfloat16_t>(mergedData[i]);
+            newPoints->setData(outData.data(), mappedIndicesSize, outNumDims);
+        }
+        else {
+            newPoints->setData(mergedData.data(), mappedIndicesSize, outNumDims);
+        }
+        newPoints->setDimensionNames(mergedDimensionNames);
+        mv::events().notifyDatasetAdded(newPoints);
+        mv::events().notifyDatasetDataChanged(newPoints);
+
+        // --- Create child datasets for newPoints, similar to createDatasets ---
+        auto childDatasets = toDataset->getChildren();
+        for (const auto& child : childDatasets) {
+            if (child->getDataType() == PointType) {
+                Dataset<Points> fullChildPoints = child->getFullDataset<Points>();
+                if (!fullChildPoints.isValid()) continue;
+                Dataset<Points> childClusterPoints = mv::data().createDerivedDataset(
+                    newPoints->getGuiName() + "||" + child->getGuiName(),
+                    newPoints
+                );
+                int childNumDimensions = fullChildPoints->getNumDimensions();
+                std::vector<int> childDimensionIndices(childNumDimensions);
+                std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
+                // Prepare the output buffer for the child dataset
+                std::vector<float> childClusterData(mappedIndicesSize * childNumDimensions);
+                // Use mappedPointIndicesTo to select the correct rows from the child dataset
+                fullChildPoints->populateDataForDimensions(childClusterData, childDimensionIndices, mappedPointIndicesTo);
+                childClusterPoints->setData(childClusterData.data(), mappedIndicesSize, childNumDimensions);
+                childClusterPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                mv::events().notifyDatasetAdded(childClusterPoints);
+                mv::events().notifyDatasetDataChanged(childClusterPoints);
+            }
+            else if (child->getDataType() == ClusterType) {
+                Dataset<Clusters> fullChildClusters = child->getFullDataset<Clusters>();
+                if (!fullChildClusters.isValid()) continue;
+                Dataset<Clusters> childClusterDataset = mv::data().createDataset(
+                    "Cluster",
+                    newPoints->getGuiName() + "||" + child->getGuiName(),
+                    newPoints
+                );
+                std::unordered_map<int, int> toIndexToMergedIndex;
+                for (size_t i = 0; i < mappedPointIndicesTo.size(); ++i) {
+                    toIndexToMergedIndex[mappedPointIndicesTo[i]] = static_cast<int>(i);
+                }
+                for (const auto& cluster : fullChildClusters->getClusters()) {
+                    std::vector<std::seed_seq::result_type> remappedIndices;
+                    const auto& originalIndices = cluster.getIndices();
+                    for (int idx : originalIndices) {
+                        auto it = toIndexToMergedIndex.find(idx);
+                        if (it != toIndexToMergedIndex.end()) {
+                            remappedIndices.push_back(it->second);
+                        }
+                    }
+                    Cluster remappedCluster = cluster;
+                    remappedCluster.setIndices(remappedIndices);
+                    childClusterDataset->addCluster(remappedCluster);
+                }
+                mv::events().notifyDatasetAdded(childClusterDataset);
+                mv::events().notifyDatasetDataChanged(childClusterDataset);
+            }
+        }
+    }
+
+
+    datasetTask.setProgressDescription("Merging complete for current datasets");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+
+    qDebug() << "Merging complete for current datasets";
+    qDebug() << "Transforming dataset finished";
+}
 
 void GradientSurferTransformationPlugin::transformMultiDatasetRowNormalize()
 {
@@ -409,12 +725,12 @@ void GradientSurferTransformationPlugin::transformCluster()
     mv::DatasetTask& datasetTask = points->getTask();
 
     datasetTask.setName("Transforming");
-    datasetTask.setRunning();
+    //datasetTask.setRunning();
  
     if (_datasetNameSelection.isEmpty()|| _splitNameSelection.isEmpty())
     {
         datasetTask.setProgressDescription("No transformation selected");
-        datasetTask.setFinished();
+        //datasetTask.setFinished();
         return;
     }
     datasetTask.setProgressDescription(QString("Splitting %1 based on %2 and cluster %3").arg(points->getGuiName(), _datasetNameSelection, _splitNameSelection));
@@ -445,7 +761,7 @@ void GradientSurferTransformationPlugin::createDatasetsSubstring(mv::Dataset<Poi
         datasetTask.setFinished();
         return;
     }
-
+    datasetTask.setRunning();
     const QStringList substrings = dialog.enteredSubstrings();
     const QString dtype = dialog.selectedDataType();
 
@@ -526,7 +842,7 @@ void GradientSurferTransformationPlugin::createDatasetsMultInitCluster(mv::Datas
     _clustersSplitDataset = nullptr;
     _splitIndicesMap.clear();
     _splitIndices.clear();
-
+    datasetTask.setRunning();
     bool foundClustersSplitDatas = false;
     int totalClusters = 0;
     int processedClusters = 0;
@@ -979,7 +1295,7 @@ void GradientSurferTransformationPlugin::createDatasetsSingleInitCluster(mv::Dat
     _clustersSplitDataset = nullptr;
     _splitIndicesMap.clear();
     _splitIndices.clear();
-
+    datasetTask.setRunning();
     datasetTask.setProgress(0.0f);
     datasetTask.setProgressDescription("Searching for selected cluster...");
 
@@ -1093,8 +1409,53 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
     if (!PluginFactory::areAllDatasetsOfTheSameType(datasets, PointType))
         return pluginTriggerActions;
 
-    // --- Multi-Dataset Normalize Rows Action ---
+    // --- Multi-Dataset Actions ---
     if (numberOfDatasets > 1) {
+        // Only allow merging if exactly 2 datasets
+        if (numberOfDatasets == 2)
+        {
+            bool allHaveClusterChild = true;
+            for (const auto& dataset : datasets) {
+                bool hasClusterChild = false;
+                auto children = dataset->getChildren();
+                for (const auto& child : children) {
+                    if (child->getDataType() == ClusterType) {
+                        hasClusterChild = true;
+                        break;
+                    }
+                }
+                if (!hasClusterChild) {
+                    allHaveClusterChild = false;
+                    break;
+                }
+            }
+            if(allHaveClusterChild)
+                {
+                    auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+                        return new mv::gui::PluginTriggerAction(
+                            const_cast<GradientSurferTransformationPluginFactory*>(this),
+                            this,
+                            name,
+                            desc,
+                            icon,
+                            std::forward<decltype(func)>(func)
+                        );
+                        };
+
+                    pluginTriggerActions << makeAction(
+                        "GradientSurfer_Multi-Dataset_Point_Merging",
+                        "Perform dataset data point merging transformation",
+                        QIcon::fromTheme("code-merge"),
+                        [this, datasets](mv::gui::PluginTriggerAction&) {
+                            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                            pluginInstance->setInputDatasets(datasets);
+                            pluginInstance->setType("MultiDatasetPointMerging==>");
+                            pluginInstance->transformMultiDatasetPointMerge();
+                        }
+                    );
+                }
+        }
+        // Always allow normalization if more than one dataset
         auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
             return new mv::gui::PluginTriggerAction(
                 const_cast<GradientSurferTransformationPluginFactory*>(this),
@@ -1127,7 +1488,7 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
     if (datasetMain->getNumDimensions() <= 0 || datasetMain->getNumPoints() <= 0)
         return pluginTriggerActions;
 
-    // --- Helper lambdas for action creation ---
+    // --- Helper lambda for action creation ---
     auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
         return new mv::gui::PluginTriggerAction(
             const_cast<GradientSurferTransformationPluginFactory*>(this),
@@ -1168,13 +1529,11 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
     // --- Collect child dataset options ---
     QVector<QPair<QString, QStringList>> clusterOptionTypes, pointOptionTypes;
     const auto children = datasetMain->getChildren();
-    bool containsClusterchildren = false;
     for (const auto& child : children) {
         if (child->getDataType() == ClusterType) {
-            containsClusterchildren = true;
             Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(child.getDatasetId());
             if (clusterDataset.isValid()) {
-                QStringList options{ "0:All","1:Substring"};
+                QStringList options{ "0:All", "1:Substring" };
                 const auto clusters = clusterDataset->getClusters();
                 if (clusters.count() < 500) {
                     int idx = 2;
@@ -1200,8 +1559,6 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
     // --- Cluster Split Actions ---
     for (const auto& optionType : clusterOptionTypes) {
         const QString& mainCategory = optionType.first;
-        
-        // Actions for splitting by cluster name or "All" 
         for (const auto& subOption : optionType.second) {
             QString firstCopy = mainCategory, subCopy = subOption;
             firstCopy.replace("/", " ");
@@ -1220,7 +1577,6 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
                 }
             );
         }
-
     }
 
     // --- Point Split Actions ---
@@ -1286,11 +1642,15 @@ void GradientSurferTransformationPlugin::createDatasets()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = QString::number(_transformationNumber) +"." 
-        + inputPointsDataset->getGuiName() + "/" 
+    QString newDatasetName = 
+        //QString::number(_transformationNumber) +"." + 
+        inputPointsDataset->getGuiName() + "||" 
         //+ _datasetNameSelection + "/" 
         + _splitNameSelection;
-
+    int groupID = inputPointsDataset->getGroupIndex();
+    if(groupID >= 0) {
+        groupID = 10 * groupID +  _transformationNumber;
+    }
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
     events().notifyDatasetAdded(clusterPointsDataset);
@@ -1301,7 +1661,9 @@ void GradientSurferTransformationPlugin::createDatasets()
     clusterPointsDataset->setData(clusterPointsData.data(), _splitIndices.size(), numDimensions);
     clusterPointsDataset->setDimensionNames(dimensionNames);
     datasetsToNotify.push_back(clusterPointsDataset);
-
+    if(groupID >= 0) {
+        clusterPointsDataset->setGroupIndex(groupID);
+    }
 
     qDebug() << "Step 1 - Finished processing main Points dataset";
 
@@ -1332,11 +1694,15 @@ void GradientSurferTransformationPlugin::createDatasets()
                 //clusterPointsDataset->getGuiName() + "/" + 
                 //QString::number(_transformationNumber) + "."+
                 //_splitNameSelection+"/" +
-                child->getGuiName(),
+                clusterPointsDataset->getGuiName() + "||" +
+                child->getGuiName() ,
                 clusterPointsDataset
             );
-            events().notifyDatasetAdded(childClusterPoints);
 
+            events().notifyDatasetAdded(childClusterPoints);
+            if (groupID >= 0) {
+                childClusterPoints->setGroupIndex(groupID);
+            }
             int childNumDimensions = fullChildPoints->getNumDimensions();
             std::vector<int> childDimensionIndices(childNumDimensions);
             std::iota(childDimensionIndices.begin(), childDimensionIndices.end(), 0);
@@ -1364,11 +1730,14 @@ void GradientSurferTransformationPlugin::createDatasets()
                 //clusterPointsDataset->getGuiName() + "/" +
                 //QString::number(_transformationNumber) + "." +
                 //_splitNameSelection + "/" +
+                clusterPointsDataset->getGuiName() + "||" +
                 child->getGuiName(),
                 clusterPointsDataset
             );
             events().notifyDatasetAdded(childClusterDataset);
-
+            if (groupID >= 0) {
+                childClusterDataset->setGroupIndex(groupID);
+            }
             // For each cluster in the child, remap indices to the new cluster subset
             for (const auto& cluster : fullChildClusters->getClusters()) {
                 std::vector<std::seed_seq::result_type> remappedIndices;
