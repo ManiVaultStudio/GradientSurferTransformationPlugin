@@ -1096,11 +1096,22 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     }
 
     // Step 5: Prepare output data
-    std::vector<float> data(numPoints * numDims);
-    std::vector<int> dimensionIndices;
-    for (int i = 0; i < numDims; i++)
-        dimensionIndices.push_back(i);
+    std::vector<float> data;
+    try {
+        data.resize(static_cast<size_t>(numPoints) * static_cast<size_t>(numDims));
+    }
+    catch (const std::bad_alloc&) {
+        qDebug() << "Out of memory allocating buffer for normalization.";
+        datasetTask.setProgressDescription("Out of memory allocating buffer. Try reducing dataset size.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    std::vector<int> dimensionIndices(numDims);
+    std::iota(dimensionIndices.begin(), dimensionIndices.end(), 0);
     points->populateDataForDimensions(data, dimensionIndices);
+
 
     // Step 6: Compute statistics for global normalization
     float minVal = std::numeric_limits<float>::max();
@@ -1183,6 +1194,8 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     datasetTask.setProgressDescription("Normalization complete");
     datasetTask.setProgress(1.0f);
     datasetTask.setFinished();
+
+    qDebug() << "Normalization complete";
 }
 
 
