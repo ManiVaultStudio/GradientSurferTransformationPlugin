@@ -328,6 +328,7 @@ public:
         methodCombo->addItem("L1 (Manhattan)");
         methodCombo->addItem("Max");
         methodCombo->addItem("Z-Score");
+        methodCombo->addItem("Z-Score-RowWise");
         methodCombo->addItem("Min-Max");
         methodCombo->addItem("Decimal Scaling");
         methodCombo->addItem("MaxAbs");

@@ -1119,7 +1119,8 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
         method == "Softmax" ||
         method == "L1" ||
         method == "L2" ||
-        method == "Max");
+        method == "Max" ||
+        method == "Z-Score-RowWise");
 
     if (isRowWise) {
 
