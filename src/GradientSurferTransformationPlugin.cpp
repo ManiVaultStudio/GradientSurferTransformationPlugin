@@ -250,7 +250,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
 
     //remove missing rows if onlyKeepFoundRows is true and inplace is true
 
-    if (mappedPointIndicesTo.empty() || mappedPointIndicesFrom.empty() || mappedPointIndicesFrom.size()!= mappedPointIndicesTo.size()) {
+    if (mappedPointIndicesTo.empty() || mappedPointIndicesFrom.empty() || mappedPointIndicesFrom.size() != mappedPointIndicesTo.size()) {
         qWarning() << "Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.";
         datasetTask.setProgressDescription("Not all rows in the 'to' dataset have a corresponding row in the 'from' dataset, cannot merge.");
         datasetTask.setProgress(1.0f);
@@ -276,7 +276,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
     auto dimensionNamesTo = toDataset->getDimensionNames();
     auto dimensionNamesFrom = fromDataset->getDimensionNames();
 
-    
+
     fromDataset->populateDataForDimensions(dataFrom, dimensionIndicesFrom, mappedPointIndicesFrom);
 
     // Merge data
@@ -318,7 +318,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetPointMerge()
     }
 
     // Output: inplace or new dataset
-    
+
     int outNumDims = static_cast<int>(mergedDimensionNames.size());
 
     {
@@ -520,7 +520,7 @@ void GradientSurferTransformationPlugin::transformMultiDatasetRowNormalize()
             dimensionIndices.push_back(i);
         points->populateDataForDimensions(data, dimensionIndices);
         //qInfo() << "Normalizing "+points->getGuiName();
-        normalizeVector(data, method.toStdString(), globalMin, globalMax,  norm,  mean,  stddev,  maxAbs,  scale);
+        normalizeVector(data, method.toStdString(), globalMin, globalMax, norm, mean, stddev, maxAbs, scale);
 
         if (dtype == "bfloat16") {
             std::vector<biovault::bfloat16_t> outData(data.size());
@@ -592,7 +592,7 @@ void GradientSurferTransformationPlugin::transformRemoveZeroColumns()
     // Get reference to dataset task for reporting progress
     mv::DatasetTask& datasetTask = points->getTask();
     datasetTask.setName("Transforming");
-    
+
     datasetTask.setProgressDescription(QString("Removing zero columns."));
     qDebug() << "Transforming dataset";
     removeZeroColumns(points, datasetTask);
@@ -726,8 +726,8 @@ void GradientSurferTransformationPlugin::transformCluster()
 
     datasetTask.setName("Transforming");
     //datasetTask.setRunning();
- 
-    if (_datasetNameSelection.isEmpty()|| _splitNameSelection.isEmpty())
+
+    if (_datasetNameSelection.isEmpty() || _splitNameSelection.isEmpty())
     {
         datasetTask.setProgressDescription("No transformation selected");
         //datasetTask.setFinished();
@@ -747,7 +747,7 @@ void GradientSurferTransformationPlugin::transformCluster()
     {
         createDatasetsSingleInitCluster(points, datasetTask);
     }
-    
+
 
 
 }
@@ -940,7 +940,7 @@ void GradientSurferTransformationPlugin::createDatasetsPointSplit(mv::Dataset<Po
                     {
                         exampleValues.insert(dimensionData.at(i));
                     }
-                    
+
 
 
                     float defaultValue = (minValue != maxValue) ? (minValue + maxValue) / 2.0f : minValue;
@@ -1096,54 +1096,119 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     }
 
     // Step 5: Prepare output data
-    std::vector<float> data(numPoints * numDims);
-    std::vector<int> dimensionIndices;
-    for (int i = 0; i < numDims; i++)
-        dimensionIndices.push_back(i);
+    std::vector<float> data;
+    try {
+        data.resize(static_cast<size_t>(numPoints) * static_cast<size_t>(numDims));
+    }
+    catch (const std::bad_alloc&) {
+        qDebug() << "Out of memory allocating buffer for normalization.";
+        datasetTask.setProgressDescription("Out of memory allocating buffer. Try reducing dataset size.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    std::vector<int> dimensionIndices(numDims);
+    std::iota(dimensionIndices.begin(), dimensionIndices.end(), 0);
     points->populateDataForDimensions(data, dimensionIndices);
 
-    // Step 6: Compute statistics for global normalization
-    float minVal = std::numeric_limits<float>::max();
-    float maxVal = std::numeric_limits<float>::lowest();
-    float norm = 0.0f;
-    float mean = 0.0f;
-    float stddev = 0.0f;
-    float maxAbs = 0.0f;
-    float scale = 0.0f;
+    // Step 6: Normalize (row-wise or global)
+    bool isRowWise = (method == "CPM" ||
+        method == "CPM_Log1p" ||
+        method == "CPM_Log1p_ZScore" ||
+        method == "Softmax" ||
+        method == "L1" ||
+        method == "L2" ||
+        method == "Max" ||
+        method == "Z-Score-RowWise");
 
-    if (!data.empty()) {
-        // Min, Max, MaxAbs
-        for (float v : data) {
-            if (v < minVal) minVal = v;
-            if (v > maxVal) maxVal = v;
-            if (std::abs(v) > maxAbs) maxAbs = std::abs(v);
-            norm += v * v;
-            mean += v;
+    if (isRowWise) {
+
+        assert(data.size() == static_cast<size_t>(numPoints) * static_cast<size_t>(numDims));
+        std::vector<float> row(numDims);
+        assert(row.size() == static_cast<size_t>(numDims));
+        //qDebug() << "Starting row-wise normalization of" << numPoints << "rows and" << numDims << "dimensions.";
+
+        for (int i = 0; i < numPoints; ++i)
+        {
+            auto src = data.begin() + static_cast<size_t>(i) * static_cast<size_t>(numDims);
+
+            // qdebug progress
+            /*if (i % 10000 == 0) {
+                float progress = static_cast<float>(i) / static_cast<float>(numPoints);
+                qDebug() << "Normalizing row" << i << "of" << numPoints << "(" << QString::number(progress * 100.0f, 'f', 2) << "% )";
+            }*/
+
+            // check
+            if (src + numDims > data.end()) {
+                qDebug() << "Bounds error at row" << i << " numDims=" << numDims;
+                break;
+            }
+
+            std::copy_n(src, numDims, row.begin());
+
+            // row stats
+            float minVal = *std::min_element(row.begin(), row.end());
+            float maxVal = *std::max_element(row.begin(), row.end());
+            float mean = std::accumulate(row.begin(), row.end(), 0.0f) / numDims;
+            float norm = std::sqrt(std::inner_product(row.begin(), row.end(), row.begin(), 0.0f));
+            float maxAbs = *std::max_element(row.begin(), row.end(), [](float a, float b) { return std::abs(a) < std::abs(b); });
+            float scale = maxVal - minVal;
+            float stddev = 0.0f;
+            for (float v : row) stddev += (v - mean) * (v - mean);
+            stddev = std::sqrt(stddev / numDims);
+
+            normalizeVector(row, method.toStdString(), minVal, maxVal, norm, mean, stddev, maxAbs, scale);
+
+            std::copy(row.begin(), row.end(), src);
         }
-        norm = std::sqrt(norm);
-        mean /= static_cast<float>(data.size());
 
-        // Standard deviation
-        float sumSq = 0.0f;
-        for (float v : data) {
-            sumSq += (v - mean) * (v - mean);
-        }
-        stddev = std::sqrt(sumSq / static_cast<float>(data.size()));
-
-        // Scale: difference between max and min
-        scale = maxVal - minVal;
+        //qDebug() << "Row-wise normalization complete";
     }
     else {
-        minVal = 0.0f;
-        maxVal = 1.0f;
-        norm = 0.0f;
-        mean = 0.0f;
-        stddev = 0.0f;
-        maxAbs = 0.0f;
-        scale = 1.0f;
+        // Global normalization
+        float minVal = std::numeric_limits<float>::max();
+        float maxVal = std::numeric_limits<float>::lowest();
+        float norm = 0.0f;
+        float mean = 0.0f;
+        float stddev = 0.0f;
+        float maxAbs = 0.0f;
+        float scale = 0.0f;
+
+        if (!data.empty()) {
+            // Min, Max, MaxAbs
+            for (float v : data) {
+                if (v < minVal) minVal = v;
+                if (v > maxVal) maxVal = v;
+                if (std::abs(v) > maxAbs) maxAbs = std::abs(v);
+                norm += v * v;
+                mean += v;
+            }
+            norm = std::sqrt(norm);
+            mean /= static_cast<float>(data.size());
+
+            // Standard deviation
+            float sumSq = 0.0f;
+            for (float v : data) {
+                sumSq += (v - mean) * (v - mean);
+            }
+            stddev = std::sqrt(sumSq / static_cast<float>(data.size()));
+
+            // Scale: difference between max and min
+            scale = maxVal - minVal;
+        }
+        else {
+            minVal = 0.0f;
+            maxVal = 1.0f;
+            norm = 0.0f;
+            mean = 0.0f;
+            stddev = 0.0f;
+            maxAbs = 0.0f;
+            scale = 1.0f;
+        }
+
+        normalizeVector(data, method.toStdString(), minVal, maxVal, norm, mean, stddev, maxAbs, scale);
     }
-    // Call the normalization utility function
-    normalizeVector(data, method.toStdString(), minVal, maxVal,  norm,  mean,  stddev,  maxAbs,  scale);
 
     // Step 8: Output
     if (dtype == "bfloat16") {
@@ -1183,6 +1248,8 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     datasetTask.setProgressDescription("Normalization complete");
     datasetTask.setProgress(1.0f);
     datasetTask.setFinished();
+
+    qDebug() << "Normalization complete";
 }
 
 
@@ -1373,15 +1440,15 @@ void GradientSurferTransformationPlugin::setType(const QString& type)
 GradientSurferTransformationPluginFactory::GradientSurferTransformationPluginFactory()
 {
     setIconByName("barcode");
-	getPluginMetadata().setDescription("GradientSurfer transformation plugin");
+    getPluginMetadata().setDescription("GradientSurfer transformation plugin");
     getPluginMetadata().setSummary("This GradientSurfer shows how to implement a basic data transformation plugin in ManiVault Studio.");
     getPluginMetadata().setCopyrightHolder({ "BioVault (Biomedical Visual Analytics Unit LUMC - TU Delft)" });
     getPluginMetadata().setAuthors({
-    });
+        });
     getPluginMetadata().setOrganizations({
         { "LUMC", "Leiden University Medical Center", "https://www.lumc.nl/en/" },
         { "TU Delft", "Delft university of technology", "https://www.tudelft.nl/" }
-	});
+        });
     getPluginMetadata().setLicenseText("This plugin is distributed under the [LGPL v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html) license.");
 }
 
@@ -1429,31 +1496,31 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
                     break;
                 }
             }
-            if(allHaveClusterChild)
-                {
-                    auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
-                        return new mv::gui::PluginTriggerAction(
-                            const_cast<GradientSurferTransformationPluginFactory*>(this),
-                            this,
-                            name,
-                            desc,
-                            icon,
-                            std::forward<decltype(func)>(func)
-                        );
-                        };
-
-                    pluginTriggerActions << makeAction(
-                        "GradientSurfer_Multi-Dataset_Point_Merging",
-                        "Perform dataset data point merging transformation",
-                        QIcon::fromTheme("code-merge"),
-                        [this, datasets](mv::gui::PluginTriggerAction&) {
-                            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
-                            pluginInstance->setInputDatasets(datasets);
-                            pluginInstance->setType("MultiDatasetPointMerging==>");
-                            pluginInstance->transformMultiDatasetPointMerge();
-                        }
+            if (allHaveClusterChild)
+            {
+                auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+                    return new mv::gui::PluginTriggerAction(
+                        const_cast<GradientSurferTransformationPluginFactory*>(this),
+                        this,
+                        name,
+                        desc,
+                        icon,
+                        std::forward<decltype(func)>(func)
                     );
-                }
+                    };
+
+                pluginTriggerActions << makeAction(
+                    "GradientSurfer_Multi-Dataset_Point_Merging",
+                    "Perform dataset data point merging transformation",
+                    QIcon::fromTheme("code-merge"),
+                    [this, datasets](mv::gui::PluginTriggerAction&) {
+                        auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                        pluginInstance->setInputDatasets(datasets);
+                        pluginInstance->setType("MultiDatasetPointMerging==>");
+                        pluginInstance->transformMultiDatasetPointMerge();
+                    }
+                );
+            }
         }
         // Always allow normalization if more than one dataset
         auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
@@ -1642,14 +1709,14 @@ void GradientSurferTransformationPlugin::createDatasets()
     std::iota(allDimensionIndices.begin(), allDimensionIndices.end(), 0);
 
     // Construct a descriptive name for the new dataset
-    QString newDatasetName = 
+    QString newDatasetName =
         //QString::number(_transformationNumber) +"." + 
-        inputPointsDataset->getGuiName() + "||" 
+        inputPointsDataset->getGuiName() + "||"
         //+ _datasetNameSelection + "/" 
         + _splitNameSelection;
     int groupID = inputPointsDataset->getGroupIndex();
-    if(groupID >= 0) {
-        groupID = 10 * groupID +  _transformationNumber;
+    if (groupID >= 0) {
+        groupID = 10 * groupID + _transformationNumber;
     }
     // Create a new Points dataset for the selected cluster
     Dataset<Points> clusterPointsDataset = mv::data().createDataset("Points", newDatasetName);
@@ -1661,7 +1728,7 @@ void GradientSurferTransformationPlugin::createDatasets()
     clusterPointsDataset->setData(clusterPointsData.data(), _splitIndices.size(), numDimensions);
     clusterPointsDataset->setDimensionNames(dimensionNames);
     datasetsToNotify.push_back(clusterPointsDataset);
-    if(groupID >= 0) {
+    if (groupID >= 0) {
         clusterPointsDataset->setGroupIndex(groupID);
     }
 
@@ -1673,8 +1740,8 @@ void GradientSurferTransformationPlugin::createDatasets()
     int childIndex = 0;
     for (const Dataset<Clusters>& child : childDatasets) {
         qDebug() << "Processing child" << childIndex
-                 << "name:" << child->getGuiName()
-                 << "type:" << child->getDataType().getTypeString();
+            << "name:" << child->getGuiName()
+            << "type:" << child->getDataType().getTypeString();
 
         // If the child is a Points dataset, extract and create a corresponding subset
         if (child->getDataType() == PointType) {
@@ -1695,7 +1762,7 @@ void GradientSurferTransformationPlugin::createDatasets()
                 //QString::number(_transformationNumber) + "."+
                 //_splitNameSelection+"/" +
                 clusterPointsDataset->getGuiName() + "||" +
-                child->getGuiName() ,
+                child->getGuiName(),
                 clusterPointsDataset
             );
 

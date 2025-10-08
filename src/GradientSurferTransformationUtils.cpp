@@ -79,6 +79,10 @@ void normalizeVector(std::vector<float>& data, const std::string& method, float 
         if (stddev < 1e-8f) stddev = 1.0f;
         for (float& v : data) v = (v - mean) / stddev;
     }
+    else if (method == "Z-Score-RowWise") {
+        if (stddev < 1e-8f) stddev = 1.0f;
+        for (float& v : data) v = (v - mean) / stddev;
+    }
     else if (method == "Min-Max") {
         if (std::abs(maxVal - minVal) < 1e-8f) { minVal = 0.0f; maxVal = 1.0f; }
         for (float& v : data) v = (v - minVal) / (maxVal - minVal);

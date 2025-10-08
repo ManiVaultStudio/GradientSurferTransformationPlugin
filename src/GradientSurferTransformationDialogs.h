@@ -42,7 +42,7 @@ public:
         layout->addWidget(modeCombo);
 
         // Search/filter box for value selection
-        layout->addWidget(new QLabel(QString("Search value (%1–%2):").arg(minValue).arg(maxValue)));
+        layout->addWidget(new QLabel(QString("Search value (%1â€“%2):").arg(minValue).arg(maxValue)));
         searchEdit = new QLineEdit(this);
         layout->addWidget(searchEdit);
 
@@ -328,6 +328,7 @@ public:
         methodCombo->addItem("L1 (Manhattan)");
         methodCombo->addItem("Max");
         methodCombo->addItem("Z-Score");
+        methodCombo->addItem("Z-Score-RowWise");
         methodCombo->addItem("Min-Max");
         methodCombo->addItem("Decimal Scaling");
         methodCombo->addItem("MaxAbs");
