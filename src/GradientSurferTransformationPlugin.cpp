@@ -1125,12 +1125,11 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     if (isRowWise) {
 
         assert(data.size() == static_cast<size_t>(numPoints) * static_cast<size_t>(numDims));
+        std::vector<float> row(numDims);
         assert(row.size() == static_cast<size_t>(numDims));
         //qDebug() << "Starting row-wise normalization of" << numPoints << "rows and" << numDims << "dimensions.";
 
-        std::vector<float> row(numDims);
-
-        for (int i = 0; i < numPoints; ++i) 
+        for (int i = 0; i < numPoints; ++i)
         {
             auto src = data.begin() + static_cast<size_t>(i) * static_cast<size_t>(numDims);
 
