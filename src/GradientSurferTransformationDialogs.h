@@ -14,17 +14,21 @@
 #include <QPushButton>
 #include <QSet>
 #include <QStringList>
+#include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
 
 struct DatasetClusterOptions {
     QString datasetName;
     QString datasetId;
-    QList<QPair<QString, QString>> clusterPrimaryKeyOptions; // (name, id)
+    QList<QPair<QString, QString>> clusterPrimaryKeyOptions; 
 };
-// Custom dialog for transformation parameters, styled like RemoveDimensionsDialog
+
+
+
 class TransformationParamDialog : public QDialog {
     Q_OBJECT
 public:
-    // Add exampleValues parameter
     TransformationParamDialog(float minValue, float maxValue, float defaultValue, const QSet<float>& exampleValues, QWidget* parent = nullptr)
         : QDialog(parent)
         , _minValue(minValue)
@@ -34,35 +38,29 @@ public:
         setWindowTitle("Transformation Parameters");
         QVBoxLayout* layout = new QVBoxLayout(this);
 
-        // Mode selection
         layout->addWidget(new QLabel("Choose transformation mode:"));
         modeCombo = new QComboBox(this);
         modeCombo->addItem("Split by value");
         modeCombo->addItem("Extract by value");
         layout->addWidget(modeCombo);
 
-        // Search/filter box for value selection
         layout->addWidget(new QLabel(QString("Search value (%1–%2):").arg(minValue).arg(maxValue)));
         searchEdit = new QLineEdit(this);
         layout->addWidget(searchEdit);
 
-        // Value selection list
         valueList = new QListWidget(this);
         valueList->setSelectionMode(QAbstractItemView::SingleSelection);
 
-        // Populate with example values, sorted
         QList<float> sortedExamples = exampleValues.values();
         std::sort(sortedExamples.begin(), sortedExamples.end());
         for (float v : sortedExamples) {
             valueList->addItem(QString::number(v, 'f', 2));
         }
-        // fallback: if no example values, populate with range
         if (valueList->count() == 0) {
             for (float v = minValue; v <= maxValue + 1e-4; v += 0.01f) {
                 valueList->addItem(QString::number(v, 'f', 2));
             }
         }
-        // Select default value
         for (int i = 0; i < valueList->count(); ++i) {
             if (qFuzzyCompare(valueList->item(i)->text().toFloat(), defaultValue)) {
                 valueList->setCurrentRow(i);
@@ -71,7 +69,6 @@ public:
         }
         layout->addWidget(valueList);
 
-        // Deselect button
         deselectButton = new QPushButton("Deselect", this);
         layout->addWidget(deselectButton);
         connect(deselectButton, &QPushButton::clicked, this, [this]() {
@@ -79,27 +76,22 @@ public:
             updateInfoLabel();
             });
 
-        // Info label for selection
         infoLabel = new QLabel(this);
         layout->addWidget(infoLabel);
         updateInfoLabel();
 
-        // OK/Cancel buttons
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
 
-        // Filter values as user types
         connect(searchEdit, &QLineEdit::textChanged, this, [this, sortedExamples, minValue, maxValue](const QString& text) {
             valueList->clear();
-            // Filter example values
             for (float v : sortedExamples) {
                 QString valStr = QString::number(v, 'f', 2);
                 if (valStr.contains(text, Qt::CaseInsensitive))
                     valueList->addItem(valStr);
             }
-            // fallback: if no example values, filter range
             if (valueList->count() == 0) {
                 for (float v = minValue; v <= maxValue + 1e-4; v += 0.01f) {
                     QString valStr = QString::number(v, 'f', 2);
@@ -107,7 +99,6 @@ public:
                         valueList->addItem(valStr);
                 }
             }
-            // Try to select the default value if present
             for (int i = 0; i < valueList->count(); ++i) {
                 if (qFuzzyCompare(valueList->item(i)->text().toFloat(), _defaultValue)) {
                     valueList->setCurrentRow(i);
@@ -117,7 +108,6 @@ public:
             updateInfoLabel();
             });
 
-        // Update info label on selection change
         connect(valueList->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
             updateInfoLabel();
             });
@@ -128,7 +118,6 @@ public:
         auto items = valueList->selectedItems();
         if (!items.isEmpty())
             return items.first()->text().toDouble();
-        // fallback to default
         return _defaultValue;
     }
 
@@ -152,7 +141,7 @@ private:
     float _minValue, _maxValue, _defaultValue;
 };
 
-// Custom dialog for removing dimensions with multi-select, search, and radio buttons
+// Custom dialog for removing dimensions with multi-select, search, radio buttons, and file import
 class RemoveDimensionsDialog : public QDialog {
     Q_OBJECT
 public:
@@ -163,24 +152,24 @@ public:
         setWindowTitle("Remove/Keep Dimensions");
         QVBoxLayout* layout = new QVBoxLayout(this);
 
-        // Search/filter box
         layout->addWidget(new QLabel("Search dimensions:"));
         searchEdit = new QLineEdit(this);
         layout->addWidget(searchEdit);
 
-        // Multi-selection list widget
         layout->addWidget(new QLabel("Select dimensions:"));
         dimensionList = new QListWidget(this);
         dimensionList->addItems(dimensions);
         dimensionList->setSelectionMode(QAbstractItemView::MultiSelection);
         layout->addWidget(dimensionList);
 
-        // Select All / Deselect All buttons
+        // Select All / Deselect All / Load from File buttons
         QHBoxLayout* selectButtonsLayout = new QHBoxLayout();
         selectAllButton = new QPushButton("Select All", this);
         deselectAllButton = new QPushButton("Deselect All", this);
+        loadFileButton = new QPushButton("Load from File", this);
         selectButtonsLayout->addWidget(selectAllButton);
         selectButtonsLayout->addWidget(deselectAllButton);
+        selectButtonsLayout->addWidget(loadFileButton);
         layout->addLayout(selectButtonsLayout);
 
         connect(selectAllButton, &QPushButton::clicked, this, [this]() {
@@ -192,13 +181,12 @@ public:
             dimensionList->clearSelection();
             updateInfoLabel();
             });
+        connect(loadFileButton, &QPushButton::clicked, this, &RemoveDimensionsDialog::loadDimensionsFromFile);
 
-        // Info label for selection counts
         infoLabel = new QLabel(this);
         layout->addWidget(infoLabel);
         updateInfoLabel();
 
-        // Radio buttons for keep/remove
         QGroupBox* radioGroup = new QGroupBox("Action", this);
         QHBoxLayout* radioLayout = new QHBoxLayout(radioGroup);
         keepRadio = new QRadioButton("Keep selected", this);
@@ -208,7 +196,6 @@ public:
         radioLayout->addWidget(removeRadio);
         layout->addWidget(radioGroup);
 
-        // Inplace/New radio buttons
         QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
         QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
         inplaceRadio = new QRadioButton("Inplace", this);
@@ -218,30 +205,26 @@ public:
         inplaceLayout->addWidget(newRadio);
         layout->addWidget(inplaceGroup);
 
-        // --- Data type radio buttons ---
         QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
         floatRadio = new QRadioButton("float", this);
-        floatRadio->setChecked(true); // Default selection
+        floatRadio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
         layout->addWidget(dtypeGroup);
 
-        // OK/Cancel buttons
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
 
-        // Filter dimensions as user types
         connect(searchEdit, &QLineEdit::textChanged, this, [this, dimensions](const QString& text) {
             dimensionList->clear();
             for (const QString& dim : dimensions) {
                 if (dim.contains(text, Qt::CaseInsensitive))
                     dimensionList->addItem(dim);
             }
-            // Restore selection if possible
             for (int i = 0; i < dimensionList->count(); ++i) {
                 QListWidgetItem* item = dimensionList->item(i);
                 if (selectedDimsSet.contains(item->text()))
@@ -250,9 +233,7 @@ public:
             updateInfoLabel();
             });
 
-        // Update info label on selection change
         connect(dimensionList->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() {
-            // Track selected items for restoring after filtering
             selectedDimsSet.clear();
             for (QListWidgetItem* item : dimensionList->selectedItems())
                 selectedDimsSet.insert(item->text());
@@ -271,20 +252,38 @@ public:
     bool isInplace() const { return inplaceRadio->isChecked(); }
     bool isNew() const { return newRadio->isChecked(); }
 
-    // Returns the selected data type as a string: "bfloat16", "float"
     QString selectedDataType() const {
         if (bfloat16Radio->isChecked()) return "bfloat16";
         if (floatRadio->isChecked()) return "float";
-        return "float"; // fallback
+        return "float";
+    }
+
+private slots:
+    void loadDimensionsFromFile() {
+        QString fileName = QFileDialog::getOpenFileName(this, "Select Dimension List File", QString(), "Text Files (*.txt);;All Files (*)");
+        if (fileName.isEmpty())
+            return;
+        QFile file(fileName);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return;
+        QSet<QString> dimsFromFile;
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            QString line = in.readLine().trimmed();
+            if (!line.isEmpty())
+                dimsFromFile.insert(line);
+        }
+        for (int i = 0; i < dimensionList->count(); ++i) {
+            QListWidgetItem* item = dimensionList->item(i);
+            item->setSelected(dimsFromFile.contains(item->text()));
+        }
+        updateInfoLabel();
     }
 
 private:
     void updateInfoLabel() {
         int selected = static_cast<int>(dimensionList->selectedItems().size());
-        int total = 0;
-        // Count visible items for not selected
-        for (int i = 0; i < dimensionList->count(); ++i)
-            ++total;
+        int total = dimensionList->count();
         int notSelected = total - selected;
         infoLabel->setText(
             QString("Selected: %1    Not selected: %2").arg(selected).arg(notSelected)
@@ -300,10 +299,9 @@ private:
     QSet<QString> selectedDimsSet;
     QPushButton* selectAllButton;
     QPushButton* deselectAllButton;
+    QPushButton* loadFileButton;
     QRadioButton* inplaceRadio;
     QRadioButton* newRadio;
-
-    // Data type radio buttons
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
 };
@@ -318,10 +316,8 @@ public:
         setWindowTitle("Normalize Data");
         QVBoxLayout* layout = new QVBoxLayout(this);
 
-        // Info label: normalization is for all values, based on the full dataset
         layout->addWidget(new QLabel("All values will be normalized using the selected method, based on the full dataset."));
 
-        // Normalization method
         layout->addWidget(new QLabel("Normalization method:"));
         methodCombo = new QComboBox(this);
         methodCombo->addItem("L2 (Euclidean)");
@@ -346,7 +342,6 @@ public:
         methodCombo->addItem("Binarize");
         layout->addWidget(methodCombo);
 
-        // Output mode
         QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
         QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
         inplaceRadio = new QRadioButton("Inplace", this);
@@ -354,10 +349,9 @@ public:
         newRadio->setChecked(true);
         inplaceLayout->addWidget(inplaceRadio);
         inplaceLayout->addWidget(newRadio);
-        inplaceGroup->setLayout(inplaceLayout); // FIX: Set layout for group box
+        inplaceGroup->setLayout(inplaceLayout);
         layout->addWidget(inplaceGroup);
 
-        // Data type
         QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
@@ -365,10 +359,9 @@ public:
         floatRadio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
-        dtypeGroup->setLayout(dtypeLayout); // FIX: Set layout for group box
+        dtypeGroup->setLayout(dtypeLayout);
         layout->addWidget(dtypeGroup);
 
-        // OK/Cancel
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -398,9 +391,7 @@ public:
     {
         setWindowTitle("Remove Zero Columns");
         QVBoxLayout* layout = new QVBoxLayout(this);
-        // Info label
         layout->addWidget(new QLabel("This will remove all columns that contain only zero values."));
-        // Output mode
         QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
         QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
         inplaceRadio = new QRadioButton("Inplace", this);
@@ -408,9 +399,8 @@ public:
         newRadio->setChecked(true);
         inplaceLayout->addWidget(inplaceRadio);
         inplaceLayout->addWidget(newRadio);
-        inplaceGroup->setLayout(inplaceLayout); // FIX: Set layout for group box
+        inplaceGroup->setLayout(inplaceLayout);
         layout->addWidget(inplaceGroup);
-        // Data type
         QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
@@ -418,9 +408,8 @@ public:
         floatRadio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
-        dtypeGroup->setLayout(dtypeLayout); // FIX: Set layout for group box
+        dtypeGroup->setLayout(dtypeLayout);
         layout->addWidget(dtypeGroup);
-        // OK/Cancel
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -439,7 +428,6 @@ private:
     QRadioButton* floatRadio;
 };
 
-
 class ExtractByClusterSubstringDialog : public QDialog {
     Q_OBJECT
 public:
@@ -450,7 +438,6 @@ public:
         QVBoxLayout* layout = new QVBoxLayout(this);
         layout->addWidget(new QLabel("This will extract data based on cluster substring values."));
 
-        // Input for new substring
         QHBoxLayout* inputLayout = new QHBoxLayout();
         substringEdit = new QLineEdit(this);
         QPushButton* addButton = new QPushButton("Add", this);
@@ -459,7 +446,6 @@ public:
         inputLayout->addWidget(addButton);
         layout->addLayout(inputLayout);
 
-        // List of entered substrings
         substringList = new QListWidget(this);
         substringList->setSelectionMode(QAbstractItemView::SingleSelection);
         layout->addWidget(substringList);
@@ -467,12 +453,13 @@ public:
         substringList->addItem("Macaque");
         substringList->addItem("Marmoset");
 
-
-        // Remove button
+        QHBoxLayout* fileButtonsLayout = new QHBoxLayout();
         QPushButton* removeButton = new QPushButton("Remove Selected", this);
-        layout->addWidget(removeButton);
+        loadFileButton = new QPushButton("Load from File", this);
+        fileButtonsLayout->addWidget(removeButton);
+        fileButtonsLayout->addWidget(loadFileButton);
+        layout->addLayout(fileButtonsLayout);
 
-        // Data type
         QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
@@ -483,13 +470,11 @@ public:
         dtypeGroup->setLayout(dtypeLayout);
         layout->addWidget(dtypeGroup);
 
-        // OK/Cancel
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
 
-        // Add button logic
         connect(addButton, &QPushButton::clicked, this, [this]() {
             QString text = substringEdit->text().trimmed();
             if (!text.isEmpty() && !containsSubstring(text)) {
@@ -498,16 +483,16 @@ public:
             }
             });
 
-        // Remove button logic
         connect(removeButton, &QPushButton::clicked, this, [this]() {
             auto items = substringList->selectedItems();
             for (QListWidgetItem* item : items) {
                 delete substringList->takeItem(substringList->row(item));
             }
             });
+
+        connect(loadFileButton, &QPushButton::clicked, this, &ExtractByClusterSubstringDialog::loadSubstringsFromFile);
     }
 
-    // Returns all entered substrings as a QStringList
     QStringList enteredSubstrings() const {
         QStringList result;
         for (int i = 0; i < substringList->count(); ++i)
@@ -519,7 +504,27 @@ public:
         return "float";
     }
 
-private:
+private slots:
+    void loadSubstringsFromFile() {
+        QString fileName = QFileDialog::getOpenFileName(this, "Select Substring List File", QString(), "Text Files (*.txt);;All Files (*)");
+        if (fileName.isEmpty())
+            return;
+        QFile file(fileName);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return;
+        QSet<QString> substringsFromFile;
+        for (int i = 0; i < substringList->count(); ++i)
+            substringsFromFile.insert(substringList->item(i)->text());
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            QString line = in.readLine().trimmed();
+            if (!line.isEmpty() && !substringsFromFile.contains(line)) {
+                substringList->addItem(line);
+                substringsFromFile.insert(line);
+            }
+        }
+    }
+
     bool containsSubstring(const QString& str) const {
         for (int i = 0; i < substringList->count(); ++i)
             if (substringList->item(i)->text() == str)
@@ -527,8 +532,10 @@ private:
         return false;
     }
 
+private:
     QLineEdit* substringEdit;
     QListWidget* substringList;
+    QPushButton* loadFileButton;
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
 };
@@ -544,13 +551,11 @@ public:
         setWindowTitle("Merge Rows Between Datasets");
         QVBoxLayout* layout = new QVBoxLayout(this);
 
-        // Store dataset IDs for later retrieval
         _toDatasetId1 = dataset1.datasetId;
         _toDatasetId2 = dataset2.datasetId;
 
         layout->addWidget(new QLabel("Select 'To' and 'From' datasets:"));
 
-        // --- To Dataset selection and cluster key ---
         QGroupBox* toGroup = new QGroupBox("To Dataset", this);
         QVBoxLayout* toLayout = new QVBoxLayout(toGroup);
         QString toLabel1 = QString("%1 [%2]").arg(dataset1.datasetName, dataset1.datasetId);
@@ -578,7 +583,6 @@ public:
         toGroup->setLayout(toLayout);
         layout->addWidget(toGroup);
 
-        // --- From Dataset selection and cluster key ---
         QGroupBox* fromGroup = new QGroupBox("From Dataset", this);
         QVBoxLayout* fromLayout = new QVBoxLayout(fromGroup);
         QString fromLabel1 = QString("%1 [%2]").arg(dataset1.datasetName, dataset1.datasetId);
@@ -606,7 +610,6 @@ public:
         fromGroup->setLayout(fromLayout);
         layout->addWidget(fromGroup);
 
-        // --- Radio logic to ensure only one To/From and show correct cluster key ---
         auto updateRadios = [this]() {
             if (toRadio1->isChecked()) {
                 fromRadio1->setEnabled(false);
@@ -637,44 +640,38 @@ public:
         connect(fromRadio2, &QRadioButton::toggled, this, updateRadios);
         updateRadios();
 
-        // --- Data type radio buttons ---
         QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
         QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
         bfloat16Radio = new QRadioButton("bfloat16", this);
         floatRadio = new QRadioButton("float", this);
-        bfloat16Radio->setChecked(true); // Default: bfloat16
+        bfloat16Radio->setChecked(true);
         dtypeLayout->addWidget(bfloat16Radio);
         dtypeLayout->addWidget(floatRadio);
         dtypeGroup->setLayout(dtypeLayout);
         layout->addWidget(dtypeGroup);
 
-        // --- Column keep mode radio buttons ---
         QGroupBox* keepColsGroup = new QGroupBox("Column Merge Mode", this);
         QVBoxLayout* keepColsLayout = new QVBoxLayout(keepColsGroup);
         keepBothRadio = new QRadioButton("Keep both dataset columns", this);
         keepFromRadio = new QRadioButton("Only keep 'From Dataset' columns", this);
-        keepFromRadio->setChecked(true); // Default: only keep from dataset columns
+        keepFromRadio->setChecked(true);
         keepColsLayout->addWidget(keepBothRadio);
         keepColsLayout->addWidget(keepFromRadio);
         keepColsGroup->setLayout(keepColsLayout);
         layout->addWidget(keepColsGroup);
 
-        // --- OK/Cancel buttons ---
         QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttonBox);
     }
 
-    // Dataset ID getters
     QString selectedToDatasetId() const {
         return toRadio1->isChecked() ? _toDatasetId1 : _toDatasetId2;
     }
     QString selectedFromDatasetId() const {
         return fromRadio1->isChecked() ? _toDatasetId1 : _toDatasetId2;
     }
-
-    // Cluster ID getters
     QString selectedToClusterId() const {
         if (toRadio1->isChecked())
             return toClusterCombo1->currentData().toString();
@@ -687,7 +684,6 @@ public:
         else
             return fromClusterCombo2->currentData().toString();
     }
-
     QString selectedDataType() const {
         if (bfloat16Radio->isChecked()) return "bfloat16";
         return "float";
@@ -696,22 +692,15 @@ public:
     bool keepFromColumnsOnly() const { return keepFromRadio->isChecked(); }
 
 private:
-    // Dataset selection
     QRadioButton* toRadio1;
     QRadioButton* toRadio2;
     QRadioButton* fromRadio1;
     QRadioButton* fromRadio2;
-
-    // Cluster key selection
     QComboBox* toClusterCombo1;
     QComboBox* toClusterCombo2;
     QComboBox* fromClusterCombo1;
     QComboBox* fromClusterCombo2;
-
-    // Store dataset IDs for retrieval
     QString _toDatasetId1, _toDatasetId2;
-
-    // Other options
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
     QRadioButton* keepBothRadio;
