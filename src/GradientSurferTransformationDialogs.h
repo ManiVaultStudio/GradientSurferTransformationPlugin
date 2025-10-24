@@ -428,6 +428,51 @@ private:
     QRadioButton* floatRadio;
 };
 
+class CopyDatasetsDialog : public QDialog {
+    Q_OBJECT
+public:
+    CopyDatasetsDialog(QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Copy Datasets");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        layout->addWidget(new QLabel("This will create copy of datasets."));
+        QGroupBox* includeChildrenGroup = new QGroupBox("Child Datasets", this);
+        QHBoxLayout* includeChildrenLayout = new QHBoxLayout(includeChildrenGroup);
+        includeRadio = new QRadioButton("Include children", this);
+        excludeRadio = new QRadioButton("Exclude children", this);
+        excludeRadio->setChecked(true);
+        includeChildrenLayout->addWidget(includeRadio);
+        includeChildrenLayout->addWidget(excludeRadio);
+        includeChildrenGroup->setLayout(includeChildrenLayout);
+        layout->addWidget(includeChildrenGroup);
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true);
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        dtypeGroup->setLayout(dtypeLayout);
+        layout->addWidget(dtypeGroup);
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+    bool includeChildren() const { return includeRadio->isChecked(); }
+    bool excludeChildren() const { return excludeRadio->isChecked(); }
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+
+private:
+    QRadioButton* includeRadio;
+    QRadioButton* excludeRadio;
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
+};
 class ExtractByClusterSubstringDialog : public QDialog {
     Q_OBJECT
 public:

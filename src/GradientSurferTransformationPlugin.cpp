@@ -599,6 +599,131 @@ void GradientSurferTransformationPlugin::transformRemoveZeroColumns()
 
 }
 
+void GradientSurferTransformationPlugin::copyDataset(
+    mv::Dataset<Points>& points,
+    mv::DatasetTask& datasetTask,
+    bool includeChildren,
+    const QString& dtype)
+{
+    // Step 2: Prepare data
+    int numPoints = points->getNumPoints();
+    int numDims = points->getNumDimensions();
+    if (numPoints == 0 || numDims == 0) {
+        datasetTask.setProgressDescription("No data to process");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+    std::vector<int> dimensionIndices(numDims);
+    std::iota(dimensionIndices.begin(), dimensionIndices.end(), 0);
+
+    // Step 3: Copy main dataset
+    Dataset<Points> newPoints;
+    QString newName = points->getGuiName() + "/copy";
+    if (dtype == "bfloat16") {
+        std::vector<float> data(numPoints * numDims);
+        points->populateDataForDimensions(data, dimensionIndices);
+        std::vector<biovault::bfloat16_t> outData(data.size());
+        for (size_t i = 0; i < data.size(); ++i)
+            outData[i] = static_cast<biovault::bfloat16_t>(data[i]);
+        newPoints = mv::data().createDataset("Points", newName);
+        newPoints->setData(outData.data(), numPoints, numDims);
+    }
+    else {
+        std::vector<float> data(numPoints * numDims);
+        points->populateDataForDimensions(data, dimensionIndices);
+        newPoints = mv::data().createDataset("Points", newName);
+        newPoints->setData(data.data(), numPoints, numDims);
+    }
+    newPoints->setDimensionNames(points->getDimensionNames());
+    mv::events().notifyDatasetAdded(newPoints);
+    mv::events().notifyDatasetDataChanged(newPoints);
+
+    // Step 4: Optionally copy child datasets
+    if (includeChildren) {
+        auto children = points->getChildren();
+        for (const auto& child : children) {
+            if (child->getDataType() == PointType) {
+                Dataset<Points> fullChildPoints = child->getFullDataset<Points>();
+                if (!fullChildPoints.isValid()) continue;
+                int childNumPoints = fullChildPoints->getNumPoints();
+                int childNumDims = fullChildPoints->getNumDimensions();
+                std::vector<int> childDimIndices(childNumDims);
+                std::iota(childDimIndices.begin(), childDimIndices.end(), 0);
+
+                QString childName = child->getGuiName();
+                if (dtype == "bfloat16") {
+                    std::vector<float> childData(childNumPoints * childNumDims);
+                    fullChildPoints->populateDataForDimensions(childData, childDimIndices);
+                    std::vector<biovault::bfloat16_t> outChildData(childData.size());
+                    for (size_t i = 0; i < childData.size(); ++i)
+                        outChildData[i] = static_cast<biovault::bfloat16_t>(childData[i]);
+                    Dataset<Points> newChildPoints = mv::data().createDerivedDataset(childName, newPoints);
+                    newChildPoints->setData(outChildData.data(), childNumPoints, childNumDims);
+                    newChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                    mv::events().notifyDatasetAdded(newChildPoints);
+                    mv::events().notifyDatasetDataChanged(newChildPoints);
+                }
+                else {
+                    std::vector<float> childData(childNumPoints * childNumDims);
+                    fullChildPoints->populateDataForDimensions(childData, childDimIndices);
+                    Dataset<Points> newChildPoints = mv::data().createDerivedDataset(childName, newPoints);
+                    newChildPoints->setData(childData.data(), childNumPoints, childNumDims);
+                    newChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                    mv::events().notifyDatasetAdded(newChildPoints);
+                    mv::events().notifyDatasetDataChanged(newChildPoints);
+                }
+            }
+            else if (child->getDataType() == ClusterType) {
+                Dataset<Clusters> fullChildClusters = child->getFullDataset<Clusters>();
+                if (!fullChildClusters.isValid()) continue;
+                QString childName = child->getGuiName();
+                Dataset<Clusters> newChildClusters = mv::data().createDataset("Cluster", childName, newPoints);
+                for (const auto& cluster : fullChildClusters->getClusters()) {
+                    Cluster clusterCopy = cluster;
+                    newChildClusters->addCluster(clusterCopy);
+                }
+                mv::events().notifyDatasetAdded(newChildClusters);
+                mv::events().notifyDatasetDataChanged(newChildClusters);
+            }
+        }
+    }
+
+    // Step 5: Finalize
+    datasetTask.setProgressDescription("Dataset copy complete");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+    qDebug() << "Dataset copy complete";
+}
+void GradientSurferTransformationPlugin::transformCopyMultipleDatasets()
+{
+    mv::Datasets datasets = getInputDatasets();
+    if (datasets.isEmpty())
+        return;
+
+    CopyDatasetsDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        for (auto& ds : datasets) { 
+            mv::DatasetTask& datasetTask = ds->getTask();
+            datasetTask.setProgressDescription("Copy cancelled by user");
+            datasetTask.setProgress(1.0f);
+            datasetTask.setFinished();
+        }
+        return;
+    }
+    bool includeChildren = dialog.includeChildren();
+    QString dtype = dialog.selectedDataType();
+
+    for (auto& points : datasets) {
+        if (!points.isValid())
+            continue;
+        mv::DatasetTask& datasetTask = points->getTask();
+        datasetTask.setName("Transforming");
+        datasetTask.setProgressDescription(QString("Copying dataset."));
+        auto fullPointData = points->getFullDataset<Points>();
+        copyDataset(fullPointData, datasetTask, includeChildren, dtype);
+    }
+}
 void GradientSurferTransformationPlugin::removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
     // Step 1: Get dimension names
@@ -1545,6 +1670,18 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
                 pluginInstance->transformMultiDatasetRowNormalize();
             }
         );
+
+        pluginTriggerActions << makeAction(
+            "GradientSurfer_Copy_Multiple_Datasets",
+            "Copy selected datasets and their children",
+            QIcon::fromTheme("edit-copy"),
+            [this, datasets](mv::gui::PluginTriggerAction&) {
+                auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                pluginInstance->setInputDatasets(datasets);
+                pluginInstance->transformCopyMultipleDatasets();
+            }
+        );
+
         return pluginTriggerActions;
     }
 
@@ -1678,6 +1815,18 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
             auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->transformRemoveZeroColumns();
+        }
+    );
+
+    // --- Copy dataset Action ---
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Copy_Dataset",
+        "Create a copy of the selected dataset",
+        QIcon::fromTheme("edit-copy"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->transformCopyMultipleDatasets();
         }
     );
 
