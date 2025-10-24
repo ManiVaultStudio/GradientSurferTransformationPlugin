@@ -66,6 +66,7 @@ public:
     void transformMultiDatasetPointMerge();
     void transformDimensionRemove();
     void transformRemoveZeroColumns();
+    void transformCopyMultipleDatasets();
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
@@ -75,6 +76,7 @@ public:
     void normalizeRows(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void copyDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask, bool includeChildren, const QString& dtype);
     void createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
 private:
     QString    _datasetNameSelection;
