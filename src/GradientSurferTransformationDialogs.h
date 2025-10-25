@@ -24,8 +24,6 @@ struct DatasetClusterOptions {
     QList<QPair<QString, QString>> clusterPrimaryKeyOptions; 
 };
 
-
-
 class TransformationParamDialog : public QDialog {
     Q_OBJECT
 public:
@@ -473,6 +471,7 @@ private:
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
 };
+
 class ExtractByClusterSubstringDialog : public QDialog {
     Q_OBJECT
 public:
@@ -750,4 +749,79 @@ private:
     QRadioButton* floatRadio;
     QRadioButton* keepBothRadio;
     QRadioButton* keepFromRadio;
+};
+
+class SubsampleByClusterDialog : public QDialog {
+    Q_OBJECT
+public:
+    SubsampleByClusterDialog(const QVector<QString>& guinames, QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Subsample by Cluster");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        layout->addWidget(new QLabel("Select cluster dataset:"));
+        clusterCombo = new QComboBox(this);
+        for (const auto& name : guinames)
+            clusterCombo->addItem(name);
+        layout->addWidget(clusterCombo);
+
+        connect(clusterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+            emit clusterDatasetChanged(clusterCombo->currentText());
+            });
+
+        layout->addWidget(new QLabel("Subsample percent (0-100):"));
+        percentSpin = new QDoubleSpinBox(this);
+        percentSpin->setRange(0.1, 100.0);
+        percentSpin->setValue(10.0);
+        percentSpin->setSuffix("%");
+        layout->addWidget(percentSpin);
+
+        QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
+        QHBoxLayout* inplaceLayout = new QHBoxLayout(inplaceGroup);
+        inplaceRadio = new QRadioButton("Inplace", this);
+        newRadio = new QRadioButton("New", this);
+        newRadio->setChecked(true);
+        inplaceLayout->addWidget(inplaceRadio);
+        inplaceLayout->addWidget(newRadio);
+        layout->addWidget(inplaceGroup);
+
+        QGroupBox* dtypeGroup = new QGroupBox("Data Type", this);
+        QHBoxLayout* dtypeLayout = new QHBoxLayout(dtypeGroup);
+        bfloat16Radio = new QRadioButton("bfloat16", this);
+        floatRadio = new QRadioButton("float", this);
+        floatRadio->setChecked(true);
+        dtypeLayout->addWidget(bfloat16Radio);
+        dtypeLayout->addWidget(floatRadio);
+        layout->addWidget(dtypeGroup);
+
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+
+    QString selectedClusterDatasetName() const {
+        return clusterCombo->currentText();
+    }
+
+    double subsamplePercent() const {
+        return percentSpin->value();
+    }
+    bool isInplace() const { return inplaceRadio->isChecked(); }
+    QString selectedDataType() const {
+        if (bfloat16Radio->isChecked()) return "bfloat16";
+        return "float";
+    }
+
+signals:
+    void clusterDatasetChanged(const QString& datasetName);
+
+private:
+    QComboBox* clusterCombo;
+    QDoubleSpinBox* percentSpin;
+    QRadioButton* inplaceRadio;
+    QRadioButton* newRadio;
+    QRadioButton* bfloat16Radio;
+    QRadioButton* floatRadio;
 };
