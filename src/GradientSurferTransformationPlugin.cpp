@@ -178,32 +178,57 @@ void GradientSurferTransformationPlugin::transformSubsampleByCluster()
             std::iota(childDimIndices.begin(), childDimIndices.end(), 0);
             std::vector<float> childData(subsampleIndices.size() * childNumDims);
             fullChildPoints->populateDataForDimensions(childData, childDimIndices, subsampleIndices);
-            Dataset<Points> newChildPoints = mv::data().createDerivedDataset(child->getGuiName(), outPoints);
-            newChildPoints->setData(childData.data(), subsampleIndices.size(), childNumDims);
-            newChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
-            mv::events().notifyDatasetAdded(newChildPoints);
-            mv::events().notifyDatasetDataChanged(newChildPoints);
+
+            if (!inplace) {
+                Dataset<Points> newChildPoints = mv::data().createDerivedDataset(child->getGuiName(), outPoints);
+                newChildPoints->setData(childData.data(), subsampleIndices.size(), childNumDims);
+                newChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                mv::events().notifyDatasetAdded(newChildPoints);
+                mv::events().notifyDatasetDataChanged(newChildPoints);
+            }
+            else {
+                // Inplace: update the child dataset's data directly
+                fullChildPoints->setData(childData.data(), subsampleIndices.size(), childNumDims);
+                fullChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                mv::events().notifyDatasetDataChanged(fullChildPoints);
+            }
         }
         else if (child->getDataType() == ClusterType) {
             Dataset<Clusters> fullChildClusters = child->getFullDataset<Clusters>();
             if (!fullChildClusters.isValid()) continue;
-            Dataset<Clusters> newChildClusters = mv::data().createDataset("Cluster", child->getGuiName(), outPoints);
             std::unordered_map<int, int> oldToNew;
             for (size_t i = 0; i < subsampleIndices.size(); ++i)
                 oldToNew[subsampleIndices[i]] = static_cast<int>(i);
-            for (const auto& cluster : fullChildClusters->getClusters()) {
-                std::vector<std::seed_seq::result_type> remappedIndices;
-                for (int idx : cluster.getIndices()) {
-                    auto it = oldToNew.find(idx);
-                    if (it != oldToNew.end())
-                        remappedIndices.push_back(it->second);
+
+            if (!inplace) {
+                Dataset<Clusters> newChildClusters = mv::data().createDataset("Cluster", child->getGuiName(), outPoints);
+                for (const auto& cluster : fullChildClusters->getClusters()) {
+                    std::vector<std::seed_seq::result_type> remappedIndices;
+                    for (int idx : cluster.getIndices()) {
+                        auto it = oldToNew.find(idx);
+                        if (it != oldToNew.end())
+                            remappedIndices.push_back(it->second);
+                    }
+                    Cluster remappedCluster = cluster;
+                    remappedCluster.setIndices(remappedIndices);
+                    newChildClusters->addCluster(remappedCluster);
                 }
-                Cluster remappedCluster = cluster;
-                remappedCluster.setIndices(remappedIndices);
-                newChildClusters->addCluster(remappedCluster);
+                mv::events().notifyDatasetAdded(newChildClusters);
+                mv::events().notifyDatasetDataChanged(newChildClusters);
             }
-            mv::events().notifyDatasetAdded(newChildClusters);
-            mv::events().notifyDatasetDataChanged(newChildClusters);
+            else {
+                // Inplace: update the clusters in the child dataset directly
+                for (auto& cluster : fullChildClusters->getClusters()) {
+                    std::vector<std::seed_seq::result_type> remappedIndices;
+                    for (int idx : cluster.getIndices()) {
+                        auto it = oldToNew.find(idx);
+                        if (it != oldToNew.end())
+                            remappedIndices.push_back(it->second);
+                    }
+                    cluster.setIndices(remappedIndices);
+                }
+                mv::events().notifyDatasetDataChanged(fullChildClusters);
+            }
         }
     }
 
