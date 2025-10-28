@@ -318,26 +318,28 @@ public:
 
         layout->addWidget(new QLabel("Normalization method:"));
         methodCombo = new QComboBox(this);
+        //linear
         methodCombo->addItem("L2 (Euclidean)");
         methodCombo->addItem("L1 (Manhattan)");
         methodCombo->addItem("Max");
-        methodCombo->addItem("Z-Score");
-        methodCombo->addItem("Z-Score-RowWise");
+        methodCombo->addItem("MaxAbs");
         methodCombo->addItem("Min-Max");
         methodCombo->addItem("Decimal Scaling");
-        methodCombo->addItem("MaxAbs");
+        methodCombo->addItem("Mean");
+        methodCombo->addItem("UnitRange");
+        methodCombo->addItem("Binarize");
+        //non linear
+        methodCombo->addItem("Z-Score");
+        methodCombo->addItem("Z-Score-RowWise");
         methodCombo->addItem("Log1p");
         methodCombo->addItem("Log10");
         methodCombo->addItem("Log");
+        methodCombo->addItem("Log2");
         methodCombo->addItem("CPM");
         methodCombo->addItem("CPM_Log1p");
         methodCombo->addItem("CPM_Log1p_ZScore");
-        methodCombo->addItem("Log2");
-        methodCombo->addItem("Mean");
         methodCombo->addItem("Softmax");
         methodCombo->addItem("Robust");
-        methodCombo->addItem("UnitRange");
-        methodCombo->addItem("Binarize");
         layout->addWidget(methodCombo);
 
         QGroupBox* inplaceGroup = new QGroupBox("Output Mode", this);
