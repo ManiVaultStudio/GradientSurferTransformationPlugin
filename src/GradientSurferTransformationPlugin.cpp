@@ -237,6 +237,19 @@ void GradientSurferTransformationPlugin::transformSubsampleByCluster()
     datasetTask.setFinished();
 }
 
+void GradientSurferTransformationPlugin::transformAddDummyClusterDataset()
+{
+    mv::Dataset<Points> points = getInputDataset<Points>();
+    if (!points.isValid())
+        return;
+    // Get reference to dataset task for reporting progress
+    mv::DatasetTask& datasetTask = points->getTask();
+    datasetTask.setName("Transforming");
+    datasetTask.setProgressDescription(QString("Adding dummy cluster dataset."));
+    qDebug() << "Transforming dataset";
+    addDummyClusterDataset(points, datasetTask);
+}
+
 void GradientSurferTransformationPlugin::transformDimensionRemove()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
@@ -1554,6 +1567,27 @@ void GradientSurferTransformationPlugin::normalizeRows(mv::Dataset<Points>& poin
     qDebug() << "Normalization complete";
 }
 
+void GradientSurferTransformationPlugin::addDummyClusterDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
+{
+    datasetTask.setRunning();
+    QString clusterDatasetName = "Dummy_Cluster_Dataset";
+    Dataset<Clusters> clusterDataset = mv::data().createDataset("Cluster", clusterDatasetName, points);
+    Cluster dummyCluster("Dummy_Cluster");
+    int numPoints = points->getNumPoints();
+    std::vector <std::seed_seq::result_type > clusterIndices;
+    for (int i = 0; i < numPoints; ++i) {
+        clusterIndices.push_back(i);
+    }
+    dummyCluster.setIndices(clusterIndices);
+    dummyCluster.setColor(Qt::gray);
+    dummyCluster.setName("Dummy_Cluster");
+    clusterDataset->addCluster(dummyCluster);
+    mv::events().notifyDatasetAdded(clusterDataset);
+    mv::events().notifyDatasetDataChanged(clusterDataset);
+    datasetTask.setProgressDescription("Dummy cluster dataset added");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
 
 void GradientSurferTransformationPlugin::removeDimensions(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask)
 {
@@ -1880,6 +1914,19 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
             std::forward<decltype(func)>(func)
         );
         };
+
+    // --- Dummy Cluster Dataset Add Action ---
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Dummy_Cluster_Dataset_Add",
+        "Add a dummy cluster dataset as child to the selected points dataset",
+        QIcon::fromTheme("add"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->setType("DummyClusterDatasetAdd==>");
+            pluginInstance->transformAddDummyClusterDataset();
+        }
+    );
 
     // --- Dimension Remove Action ---
     pluginTriggerActions << makeAction(
