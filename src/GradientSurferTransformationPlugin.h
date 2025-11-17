@@ -67,6 +67,7 @@ public:
     void transformDimensionRemove();
     void transformRemoveZeroColumns();
     void transformCopyMultipleDatasets();
+    void transformAddDummyClusterDataset();
     // Only declare the setter, do not define it here
     void setType(const QString& type);
     void createDatasets();
@@ -78,6 +79,7 @@ public:
     void removeZeroColumns(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void copyDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask, bool includeChildren, const QString& dtype);
     void createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
+    void addDummyClusterDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void transformSubsampleByCluster();
 private:
     QString    _datasetNameSelection;
