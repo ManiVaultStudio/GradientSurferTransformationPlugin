@@ -81,6 +81,7 @@ public:
     void createDatasetsSubstring(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void addDummyClusterDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void transformSubsampleByCluster();
+    void transformSubsampleByPoints();
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;
