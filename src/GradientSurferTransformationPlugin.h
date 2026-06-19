@@ -87,10 +87,10 @@ private:
     QString     _splitNameSelection;
     QString     _transformationType;
     int         _transformationNumber;
-    Dataset<Clusters> _clustersSplitDataset = nullptr;
+    mv::Dataset<Clusters> _clustersSplitDataset = nullptr;
     std::unordered_map<int, int> _splitIndicesMap;
     std::vector<std::seed_seq::result_type> _splitIndices;
-    Dataset<Points>  _pointsSplitDataset = nullptr;
+    mv::Dataset<Points>  _pointsSplitDataset = nullptr;
 
 };
 
