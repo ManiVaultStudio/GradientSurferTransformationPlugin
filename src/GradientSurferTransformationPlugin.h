@@ -82,6 +82,7 @@ public:
     void addDummyClusterDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void transformSubsampleByCluster();
     void transformSubsampleByPoints();
+    void transformCellTypesReplace();
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;

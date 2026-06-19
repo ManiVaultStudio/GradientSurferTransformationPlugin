@@ -204,6 +204,79 @@ void GradientSurferTransformationPlugin::transformSubsampleByPoints()
     datasetTask.setFinished();
 }
 
+void GradientSurferTransformationPlugin::transformCellTypesReplace()
+{
+    mv::Dataset<Points> points = getInputDataset<Points>();
+    if (!points.isValid())
+        return;
+
+    mv::DatasetTask& datasetTask = points->getTask();
+    datasetTask.setName("Replace Cell Types");
+
+    CellTypesReplaceDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Cell type replacement cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    datasetTask.setRunning();
+
+    const QMap<QString, QString> cellTypeMappings = dialog.mappings();
+    if (cellTypeMappings.isEmpty()) {
+        datasetTask.setProgressDescription("No mappings provided");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Collect target cluster datasets based on scope checkbox
+    QVector<Dataset<Clusters>> targetClusterDatasets;
+
+    if (dialog.applyToAllClusters()) {
+        // Walk the entire data hierarchy and collect every Cluster dataset
+        for (const auto& dataset : mv::data().getAllDatasets()) {
+            if (dataset->getDataType() == ClusterType) {
+                Dataset<Clusters> clusters = dataset->getFullDataset<Clusters>();
+                if (clusters.isValid())
+                    targetClusterDatasets.append(clusters);
+            }
+        }
+    }
+    else {
+        // Only the direct Cluster children of the input Points dataset
+        for (const auto& child : points->getChildren()) {
+            if (child->getDataType() != ClusterType)
+                continue;
+            Dataset<Clusters> clusters = child->getFullDataset<Clusters>();
+            if (clusters.isValid())
+                targetClusterDatasets.append(clusters);
+        }
+    }
+
+    // Apply the before->after name mappings to every collected cluster dataset
+    for (auto& clusters : targetClusterDatasets) {
+        auto clusterList = clusters->getClusters();
+        bool modified = false;
+        for (auto& cluster : clusterList) {
+            const QString oldName = cluster.getName();
+            if (cellTypeMappings.contains(oldName)) {
+                cluster.setName(cellTypeMappings[oldName]);
+                modified = true;
+            }
+        }
+        if (modified) {
+            clusters->setClusters(clusterList);
+            mv::events().notifyDatasetDataChanged(clusters);
+        }
+    }
+
+    datasetTask.setProgressDescription("Cell type replacement complete");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
+
 void GradientSurferTransformationPlugin::transformSubsampleByCluster()
 {
     mv::Dataset<Points> points = getInputDataset<Points>();
@@ -2205,6 +2278,17 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
             auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->transformSubsampleByPoints();
+        }
+    );
+
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Replace_Cell_Types",
+        "Replace cell type labels via CSV mapping",
+        QIcon::fromTheme("edit-find-replace"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->transformCellTypesReplace();
         }
     );
 
