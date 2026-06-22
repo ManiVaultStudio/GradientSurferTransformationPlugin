@@ -982,10 +982,17 @@ public:
 
         layout->addWidget(tableGroup);
 
-        // --- Scope Option ---
-        allClustersCheckBox = new QCheckBox("Apply to all cluster datasets in the data hierarchy", this);
-        allClustersCheckBox->setChecked(false);
-        layout->addWidget(allClustersCheckBox);
+        // --- Scope Selection ---
+        QGroupBox* scopeGroup = new QGroupBox("Apply To", this);
+        QVBoxLayout* scopeLayout = new QVBoxLayout(scopeGroup);
+        scopeThisOnly = new QRadioButton("Selected cluster dataset only", this);
+        scopeSiblings = new QRadioButton("Selected cluster dataset and its sibling cluster datasets", this);
+        scopeAllInHierarchy = new QRadioButton("All cluster datasets in the hierarchy", this);
+        scopeThisOnly->setChecked(true);  // default
+        scopeLayout->addWidget(scopeThisOnly);
+        scopeLayout->addWidget(scopeSiblings);
+        scopeLayout->addWidget(scopeAllInHierarchy);
+        layout->addWidget(scopeGroup);
 
         // --- OK / Cancel ---
         QDialogButtonBox* buttonBox = new QDialogButtonBox(
@@ -1011,7 +1018,12 @@ public:
         return result;
     }
 
-    bool applyToAllClusters() const { return allClustersCheckBox->isChecked(); }
+    enum class Scope { ThisOnly, Siblings, AllInHierarchy };
+    Scope scope() const {
+        if (scopeSiblings->isChecked())      return Scope::Siblings;
+        if (scopeAllInHierarchy->isChecked()) return Scope::AllInHierarchy;
+        return Scope::ThisOnly;
+    }
 
 private slots:
     void onBrowse() {
@@ -1148,5 +1160,7 @@ private:
     QList<QStringList> _parsedRows;
     QStringList        _parsedHeaders;
 
-    QCheckBox* allClustersCheckBox;
+    QRadioButton* scopeThisOnly;
+    QRadioButton* scopeSiblings;
+    QRadioButton* scopeAllInHierarchy;
 };

@@ -83,6 +83,7 @@ public:
     void transformSubsampleByCluster();
     void transformSubsampleByPoints();
     void transformCellTypesReplace();
+    void setInputClusterDataset(const mv::Dataset<Clusters>& clusters) { _inputClusterDataset = clusters; }
 private:
     QString    _datasetNameSelection;
     QString     _splitNameSelection;
@@ -92,6 +93,7 @@ private:
     std::unordered_map<int, int> _splitIndicesMap;
     std::vector<std::seed_seq::result_type> _splitIndices;
     mv::Dataset<Points>  _pointsSplitDataset = nullptr;
+    mv::Dataset<Clusters> _inputClusterDataset = nullptr;
 
 };
 
