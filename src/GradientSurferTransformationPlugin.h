@@ -83,14 +83,14 @@ public:
     void transformSubsampleByCluster();
     void transformSubsampleByPoints();
 private:
-    QString    _datasetNameSelection;
-    QString     _splitNameSelection;
-    QString     _transformationType;
-    int         _transformationNumber;
-    Dataset<Clusters> _clustersSplitDataset = nullptr;
-    std::unordered_map<int, int> _splitIndicesMap;
+    QString                                 _datasetNameSelection;
+    QString                                 _splitNameSelection;
+    QString                                 _transformationType;
+    int                                     _transformationNumber;
+	mv::Dataset<Clusters>                   _clustersSplitDataset = nullptr;
+    std::unordered_map<int, int>            _splitIndicesMap;
     std::vector<std::seed_seq::result_type> _splitIndices;
-    Dataset<Points>  _pointsSplitDataset = nullptr;
+	mv::Dataset<Points>                     _pointsSplitDataset = nullptr;
 
 };
 
