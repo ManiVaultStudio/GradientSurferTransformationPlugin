@@ -82,15 +82,18 @@ public:
     void addDummyClusterDataset(mv::Dataset<Points>& points, mv::DatasetTask& datasetTask);
     void transformSubsampleByCluster();
     void transformSubsampleByPoints();
+    void transformCellTypesReplace();
+    void setInputClusterDataset(const mv::Dataset<Clusters>& clusters) { _inputClusterDataset = clusters; }
 private:
-    QString                                 _datasetNameSelection;
-    QString                                 _splitNameSelection;
-    QString                                 _transformationType;
-    int                                     _transformationNumber;
-	mv::Dataset<Clusters>                   _clustersSplitDataset = nullptr;
-    std::unordered_map<int, int>            _splitIndicesMap;
+    QString    _datasetNameSelection;
+    QString     _splitNameSelection;
+    QString     _transformationType;
+    int         _transformationNumber;
+    mv::Dataset<Clusters> _clustersSplitDataset = nullptr;
+    std::unordered_map<int, int> _splitIndicesMap;
     std::vector<std::seed_seq::result_type> _splitIndices;
-	mv::Dataset<Points>                     _pointsSplitDataset = nullptr;
+    mv::Dataset<Points>  _pointsSplitDataset = nullptr;
+    mv::Dataset<Clusters> _inputClusterDataset = nullptr;
 
 };
 

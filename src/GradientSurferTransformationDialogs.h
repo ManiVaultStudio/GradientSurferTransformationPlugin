@@ -17,6 +17,9 @@
 #include <QFileDialog>
 #include <QFile>
 #include <QTextStream>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QMessageBox>
 
 struct DatasetClusterOptions {
     QString datasetName;
@@ -885,4 +888,279 @@ private:
     QRadioButton* newRadio;
     QRadioButton* bfloat16Radio;
     QRadioButton* floatRadio;
+};
+
+class CellTypesReplaceDialog : public QDialog {
+    Q_OBJECT
+public:
+    CellTypesReplaceDialog(QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+        setWindowTitle("Replace Cell Types");
+        setMinimumWidth(580);
+        setMinimumHeight(520);
+        QVBoxLayout* layout = new QVBoxLayout(this);
+
+        // --- CSV Import ---
+        QGroupBox* csvGroup = new QGroupBox("CSV Import", this);
+        QVBoxLayout* csvLayout = new QVBoxLayout(csvGroup);
+
+        QHBoxLayout* fileRow = new QHBoxLayout();
+        csvPathEdit = new QLineEdit(this);
+        csvPathEdit->setPlaceholderText("No file selected...");
+        csvPathEdit->setReadOnly(true);
+        browseButton = new QPushButton("Browse...", this);
+        connect(browseButton, &QPushButton::clicked, this, &CellTypesReplaceDialog::onBrowse);
+        fileRow->addWidget(csvPathEdit);
+        fileRow->addWidget(browseButton);
+        csvLayout->addLayout(fileRow);
+
+        QHBoxLayout* optRow = new QHBoxLayout();
+        optRow->addWidget(new QLabel("Delimiter:", this));
+        delimiterCombo = new QComboBox(this);
+        delimiterCombo->addItems({ ",", ";", "\\t", "|", " " });
+        delimiterCombo->setEditable(true);
+        delimiterCombo->setFixedWidth(70);
+        optRow->addWidget(delimiterCombo);
+        optRow->addSpacing(16);
+        headerCheckBox = new QCheckBox("First row is header", this);
+        headerCheckBox->setChecked(true);
+        optRow->addWidget(headerCheckBox);
+        optRow->addStretch();
+        loadButton = new QPushButton("Load", this);
+        connect(loadButton, &QPushButton::clicked, this, &CellTypesReplaceDialog::onLoad);
+        optRow->addWidget(loadButton);
+        csvLayout->addLayout(optRow);
+
+        QHBoxLayout* colRow = new QHBoxLayout();
+        colRow->addWidget(new QLabel("\"Before\" column:", this));
+        beforeColCombo = new QComboBox(this);
+        beforeColCombo->setMinimumWidth(140);
+        connect(beforeColCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CellTypesReplaceDialog::onColumnSelectionChanged);
+        colRow->addWidget(beforeColCombo);
+        colRow->addSpacing(16);
+        colRow->addWidget(new QLabel("\"After\" column:", this));
+        afterColCombo = new QComboBox(this);
+        afterColCombo->setMinimumWidth(140);
+        connect(afterColCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CellTypesReplaceDialog::onColumnSelectionChanged);
+        colRow->addWidget(afterColCombo);
+        colRow->addStretch();
+        csvLayout->addLayout(colRow);
+
+        layout->addWidget(csvGroup);
+
+        // --- Mapping Table ---
+        QGroupBox* tableGroup = new QGroupBox("Cell Type Mappings", this);
+        QVBoxLayout* tableLayout = new QVBoxLayout(tableGroup);
+
+        mappingTable = new QTableWidget(0, 2, this);
+        mappingTable->setHorizontalHeaderLabels({ "Before", "After" });
+        mappingTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+        mappingTable->horizontalHeader()->setStretchLastSection(true);
+        mappingTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        mappingTable->setAlternatingRowColors(true);
+        tableLayout->addWidget(mappingTable);
+
+        QHBoxLayout* rowActions = new QHBoxLayout();
+        addRowButton = new QPushButton("+ Add Row", this);
+        deleteRowButton = new QPushButton("− Delete Selected", this);
+        connect(addRowButton, &QPushButton::clicked, this, &CellTypesReplaceDialog::onAddRow);
+        connect(deleteRowButton, &QPushButton::clicked, this, &CellTypesReplaceDialog::onDeleteRows);
+        rowActions->addWidget(addRowButton);
+        rowActions->addWidget(deleteRowButton);
+        rowActions->addStretch();
+        tableLayout->addLayout(rowActions);
+
+        connect(mappingTable->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, [this]() { updateInfoLabel(); });
+
+        infoLabel = new QLabel(this);
+        tableLayout->addWidget(infoLabel);
+        updateInfoLabel();
+
+        layout->addWidget(tableGroup);
+
+        // --- Scope Selection ---
+        QGroupBox* scopeGroup = new QGroupBox("Apply To", this);
+        QVBoxLayout* scopeLayout = new QVBoxLayout(scopeGroup);
+        scopeThisOnly = new QRadioButton("Selected cluster dataset only", this);
+        scopeSiblings = new QRadioButton("Selected cluster dataset and its sibling cluster datasets", this);
+        scopeAllInHierarchy = new QRadioButton("All cluster datasets in the hierarchy", this);
+        scopeThisOnly->setChecked(true);  // default
+        scopeLayout->addWidget(scopeThisOnly);
+        scopeLayout->addWidget(scopeSiblings);
+        scopeLayout->addWidget(scopeAllInHierarchy);
+        layout->addWidget(scopeGroup);
+
+        // --- OK / Cancel ---
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttonBox);
+    }
+
+    // Returns the confirmed before->after mapping
+    QMap<QString, QString> mappings() const {
+        QMap<QString, QString> result;
+        for (int row = 0; row < mappingTable->rowCount(); ++row) {
+            auto* beforeItem = mappingTable->item(row, 0);
+            auto* afterItem = mappingTable->item(row, 1);
+            if (beforeItem && afterItem) {
+                const QString before = beforeItem->text().trimmed();
+                const QString after = afterItem->text().trimmed();
+                if (!before.isEmpty())
+                    result[before] = after;
+            }
+        }
+        return result;
+    }
+
+    enum class Scope { ThisOnly, Siblings, AllInHierarchy };
+    Scope scope() const {
+        if (scopeSiblings->isChecked())      return Scope::Siblings;
+        if (scopeAllInHierarchy->isChecked()) return Scope::AllInHierarchy;
+        return Scope::ThisOnly;
+    }
+
+private slots:
+    void onBrowse() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, "Open CSV", QString(), "CSV Files (*.csv *.tsv *.txt);;All Files (*)");
+        if (!path.isEmpty())
+            csvPathEdit->setText(path);
+    }
+
+    void onLoad() {
+        const QString path = csvPathEdit->text();
+        if (path.isEmpty()) {
+            QMessageBox::warning(this, "No File", "Please select a CSV file first.");
+            return;
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QMessageBox::critical(this, "Error", "Cannot open file:\n" + path);
+            return;
+        }
+        const QString delimStr = delimiterCombo->currentText();
+        const QChar   delim = (delimStr == "\\t") ? '\t' : delimStr.at(0);
+        const bool    hasHeader = headerCheckBox->isChecked();
+
+        QTextStream in(&file);
+        QList<QStringList> rows;
+        while (!in.atEnd())
+            rows.append(in.readLine().split(delim));
+        file.close();
+
+        if (rows.isEmpty()) {
+            QMessageBox::warning(this, "Empty File", "The selected file contains no data.");
+            return;
+        }
+        QStringList headers;
+        if (hasHeader) {
+            headers = rows.takeFirst();
+        }
+        else {
+            for (int i = 0; i < rows.first().size(); ++i)
+                headers << QString("Column %1").arg(i + 1);
+        }
+        _parsedRows = rows;
+        _parsedHeaders = headers;
+
+        beforeColCombo->blockSignals(true);
+        afterColCombo->blockSignals(true);
+        beforeColCombo->clear();
+        afterColCombo->clear();
+        beforeColCombo->addItems(headers);
+        afterColCombo->addItems(headers);
+        if (headers.size() >= 2)
+            afterColCombo->setCurrentIndex(1);
+        beforeColCombo->blockSignals(false);
+        afterColCombo->blockSignals(false);
+
+        populateTable();
+    }
+
+    void onColumnSelectionChanged() {
+        if (!_parsedRows.isEmpty())
+            populateTable();
+    }
+
+    void onAddRow() {
+        addMappingRow("", "");
+        mappingTable->scrollToBottom();
+        mappingTable->editItem(mappingTable->item(mappingTable->rowCount() - 1, 0));
+        updateInfoLabel();
+    }
+
+    void onDeleteRows() {
+        QList<int> rows;
+        for (const auto* item : mappingTable->selectedItems())
+            if (!rows.contains(item->row()))
+                rows.append(item->row());
+        std::sort(rows.rbegin(), rows.rend());
+        mappingTable->selectionModel()->blockSignals(true);
+        for (int r : rows)
+            mappingTable->removeRow(r);
+        mappingTable->selectionModel()->blockSignals(false);
+        updateInfoLabel();
+    }
+
+private:
+    void populateTable() {
+        const int beforeIdx = beforeColCombo->currentIndex();
+        const int afterIdx = afterColCombo->currentIndex();
+        mappingTable->setUpdatesEnabled(false);          // batch all insertions
+        mappingTable->setRowCount(0);
+        for (const QStringList& row : _parsedRows) {
+            const QString before = (beforeIdx < row.size()) ? row[beforeIdx].trimmed() : QString();
+            const QString after = (afterIdx < row.size()) ? row[afterIdx].trimmed() : QString();
+            addMappingRow(before, after);
+        }
+        mappingTable->setUpdatesEnabled(true);           // single repaint at the end
+        mappingTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        updateInfoLabel();
+    }
+
+    void addMappingRow(const QString& before, const QString& after) {
+        const int row = mappingTable->rowCount();
+        mappingTable->insertRow(row);
+        mappingTable->setItem(row, 0, new QTableWidgetItem(before));
+        mappingTable->setItem(row, 1, new QTableWidgetItem(after));
+    }
+
+    void updateInfoLabel() {
+        const int selected = static_cast<int>(mappingTable->selectionModel()->selectedRows().size());
+        const int total = mappingTable->rowCount();
+        const int notSelected = total - selected;
+        infoLabel->setText(
+            QString("Selected: %1    Not selected: %2    Total: %3")
+            .arg(selected).arg(notSelected).arg(total)
+        );
+    }
+
+    // CSV import widgets
+    QLineEdit* csvPathEdit;
+    QPushButton* browseButton;
+    QComboBox* delimiterCombo;
+    QCheckBox* headerCheckBox;
+    QPushButton* loadButton;
+    QComboBox* beforeColCombo;
+    QComboBox* afterColCombo;
+
+    // Mapping table widgets
+    QTableWidget* mappingTable;
+    QPushButton* addRowButton;
+    QPushButton* deleteRowButton;
+    QLabel* infoLabel;
+
+    // Parsed CSV state
+    QList<QStringList> _parsedRows;
+    QStringList        _parsedHeaders;
+
+    QRadioButton* scopeThisOnly;
+    QRadioButton* scopeSiblings;
+    QRadioButton* scopeAllInHierarchy;
 };
