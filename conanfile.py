@@ -118,7 +118,6 @@ class GradientSurferTransformationPluginConan(ConanFile):
 
         cmake = self._configure_cmake()
         cmake.build(build_type="RelWithDebInfo")
-        cmake.build(build_type="Release")
 
     def package(self):
         package_dir = pathlib.Path(self.build_folder, "package")
@@ -136,18 +135,7 @@ class GradientSurferTransformationPluginConan(ConanFile):
                 relWithDebInfo_dir,
             ]
         )
-        subprocess.run(
-            [
-                "cmake",
-                "--install",
-                self.build_folder,
-                "--config",
-                "Release",
-                "--prefix",
-                release_dir,
-            ]
-        )
-
+       
         # Add the PDB files to the Conan package
         if self.settings.os == "Windows":
             print("Copying PDBs...")
@@ -164,6 +152,3 @@ class GradientSurferTransformationPluginConan(ConanFile):
         self.cpp_info.relwithdebinfo.libdirs = ["RelWithDebInfo/lib"]
         self.cpp_info.relwithdebinfo.bindirs = ["RelWithDebInfo/Plugins", "RelWithDebInfo"]
         self.cpp_info.relwithdebinfo.includedirs = ["RelWithDebInfo/include", "RelWithDebInfo"]
-        self.cpp_info.release.libdirs = ["Release/lib"]
-        self.cpp_info.release.bindirs = ["Release/Plugins", "Release"]
-        self.cpp_info.release.includedirs = ["Release/include", "Release"]
