@@ -59,6 +59,240 @@ void GradientSurferTransformationPlugin::transformPoint()
     qDebug() << "Transforming dataset";
 
 }
+void GradientSurferTransformationPlugin::transformSubsampleByPoints()
+{
+    mv::Dataset<Points> points = getInputDataset<Points>();
+    if (!points.isValid())
+        return;
+
+    mv::DatasetTask& datasetTask = points->getTask();
+    datasetTask.setName("Subsample by Points");
+
+    // Use GUI names for dialog
+    SubsampleByPointsDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Subsampling cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Start the task only after dialog is accepted
+    datasetTask.setRunning();
+
+    double percent = dialog.subsamplePercent();
+    bool inplace = dialog.isInplace();
+    QString dtype = dialog.selectedDataType();
+
+    // Subsample indices from the whole point dataset (not clusters)
+    int numPoints = points->getNumPoints();
+    int n_subsample = std::max(1, static_cast<int>(std::round(numPoints * percent / 100.0)));
+
+    std::vector<std::seed_seq::result_type> allIndices(numPoints);
+    std::iota(allIndices.begin(), allIndices.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(allIndices.begin(), allIndices.end(), g);
+
+    std::vector<std::seed_seq::result_type> subsampleIndices(allIndices.begin(), allIndices.begin() + n_subsample);
+
+    if (subsampleIndices.empty()) {
+        datasetTask.setProgressDescription("No indices found in point dataset.");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Prepare output dataset
+    int numDims = points->getNumDimensions();
+    std::vector<int> dimIndices(numDims);
+    std::iota(dimIndices.begin(), dimIndices.end(), 0);
+
+    std::vector<float> subsampleData(subsampleIndices.size() * numDims);
+    points->populateDataForDimensions(subsampleData, dimIndices, subsampleIndices);
+
+    Dataset<Points> outPoints;
+    if (!inplace) {
+        QString newName = points->getGuiName() + "/subsampled";
+        outPoints = mv::data().createDataset("Points", newName);
+    }
+    else {
+        outPoints = points;
+    }
+
+    if (dtype == "bfloat16") {
+        std::vector<biovault::bfloat16_t> outData(subsampleData.size());
+        for (size_t i = 0; i < subsampleData.size(); ++i)
+            outData[i] = static_cast<biovault::bfloat16_t>(subsampleData[i]);
+        outPoints->setData(outData.data(), subsampleIndices.size(), numDims);
+    }
+    else {
+        outPoints->setData(subsampleData.data(), subsampleIndices.size(), numDims);
+    }
+    outPoints->setDimensionNames(points->getDimensionNames());
+    mv::events().notifyDatasetAdded(outPoints);
+    mv::events().notifyDatasetDataChanged(outPoints);
+
+    // --- Update child datasets ---
+    auto children = points->getChildren();
+    for (const auto& child : children) {
+        if (child->getDataType() == PointType) {
+            Dataset<Points> fullChildPoints = child->getFullDataset<Points>();
+            if (!fullChildPoints.isValid()) continue;
+            int childNumDims = fullChildPoints->getNumDimensions();
+            std::vector<int> childDimIndices(childNumDims);
+            std::iota(childDimIndices.begin(), childDimIndices.end(), 0);
+            std::vector<float> childData(subsampleIndices.size() * childNumDims);
+            fullChildPoints->populateDataForDimensions(childData, childDimIndices, subsampleIndices);
+
+            if (!inplace) {
+                Dataset<Points> newChildPoints = mv::data().createDerivedDataset(child->getGuiName(), outPoints);
+                newChildPoints->setData(childData.data(), subsampleIndices.size(), childNumDims);
+                newChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                mv::events().notifyDatasetAdded(newChildPoints);
+                mv::events().notifyDatasetDataChanged(newChildPoints);
+            }
+            else {
+                // Inplace: update the child dataset's data directly
+                fullChildPoints->setData(childData.data(), subsampleIndices.size(), childNumDims);
+                fullChildPoints->setDimensionNames(fullChildPoints->getDimensionNames());
+                mv::events().notifyDatasetDataChanged(fullChildPoints);
+            }
+        }
+        else if (child->getDataType() == ClusterType) {
+            Dataset<Clusters> fullChildClusters = child->getFullDataset<Clusters>();
+            if (!fullChildClusters.isValid()) continue;
+            std::unordered_map<int, int> oldToNew;
+            for (size_t i = 0; i < subsampleIndices.size(); ++i)
+                oldToNew[subsampleIndices[i]] = static_cast<int>(i);
+
+            if (!inplace) {
+                Dataset<Clusters> newChildClusters = mv::data().createDataset("Cluster", child->getGuiName(), outPoints);
+                for (const auto& cluster : fullChildClusters->getClusters()) {
+                    std::vector<std::seed_seq::result_type> remappedIndices;
+                    for (int idx : cluster.getIndices()) {
+                        auto it = oldToNew.find(idx);
+                        if (it != oldToNew.end())
+                            remappedIndices.push_back(it->second);
+                    }
+                    Cluster remappedCluster = cluster;
+                    remappedCluster.setIndices(remappedIndices);
+                    newChildClusters->addCluster(remappedCluster);
+                }
+                mv::events().notifyDatasetAdded(newChildClusters);
+                mv::events().notifyDatasetDataChanged(newChildClusters);
+            }
+            else {
+                // Inplace: update the clusters in the child dataset directly
+                for (auto& cluster : fullChildClusters->getClusters()) {
+                    std::vector<std::seed_seq::result_type> remappedIndices;
+                    for (int idx : cluster.getIndices()) {
+                        auto it = oldToNew.find(idx);
+                        if (it != oldToNew.end())
+                            remappedIndices.push_back(it->second);
+                    }
+                    cluster.setIndices(remappedIndices);
+                }
+                mv::events().notifyDatasetDataChanged(fullChildClusters);
+            }
+        }
+    }
+
+    datasetTask.setProgressDescription("Subsampling complete");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+}
+
+void GradientSurferTransformationPlugin::transformCellTypesReplace()
+{
+    if (!_inputClusterDataset.isValid())
+        return;
+
+    // Use the cluster dataset's own task for progress reporting
+    mv::DatasetTask& datasetTask = _inputClusterDataset->getTask();
+    datasetTask.setName("Replace Cell Types");
+
+    CellTypesReplaceDialog dialog;
+    if (dialog.exec() != QDialog::Accepted) {
+        datasetTask.setProgressDescription("Cell type replacement cancelled by user");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    datasetTask.setRunning();
+
+    const QMap<QString, QString> cellTypeMappings = dialog.mappings();
+    if (cellTypeMappings.isEmpty()) {
+        datasetTask.setProgressDescription("No mappings provided");
+        datasetTask.setProgress(1.0f);
+        datasetTask.setFinished();
+        return;
+    }
+
+    // Collect target datasets based on scope selection
+    QVector<Dataset<Clusters>> targetDatasets;
+
+    switch (dialog.scope()) {
+
+    case CellTypesReplaceDialog::Scope::ThisOnly:
+        targetDatasets.append(_inputClusterDataset);
+        break;
+
+    case CellTypesReplaceDialog::Scope::Siblings: {
+        // Find all Cluster datasets that share the same parent as the input
+        const auto parent = _inputClusterDataset->getParent();
+        if (parent.isValid()) {
+            for (const auto& sibling : parent->getChildren()) {
+                if (sibling->getDataType() != ClusterType)
+                    continue;
+                Dataset<Clusters> siblingClusters = mv::data().getDataset<Clusters>(sibling.getDatasetId());
+                if (siblingClusters.isValid())
+                    targetDatasets.append(siblingClusters);
+            }
+        }
+        else {
+            // No parent — fall back to this dataset only
+            targetDatasets.append(_inputClusterDataset);
+        }
+        break;
+    }
+
+    case CellTypesReplaceDialog::Scope::AllInHierarchy:
+        for (const auto& dataset : mv::data().getAllDatasets()) {
+            if (dataset->getDataType() != ClusterType)
+                continue;
+            Dataset<Clusters> clusters = mv::data().getDataset<Clusters>(dataset.getDatasetId());
+            if (clusters.isValid())
+                targetDatasets.append(clusters);
+        }
+        break;
+    }
+
+    // Apply mappings — only notify datasets that actually changed
+    for (auto& clusters : targetDatasets) {
+        auto clusterList = clusters->getClusters();
+        bool modified = false;
+        for (auto& cluster : clusterList) {
+            const QString oldName = cluster.getName();
+            if (cellTypeMappings.contains(oldName)) {
+                cluster.setName(cellTypeMappings[oldName]);
+                modified = true;
+            }
+        }
+        if (modified) {
+            clusters->setClusters(clusterList);
+            mv::events().notifyDatasetDataChanged(clusters);
+        }
+    }
+
+    datasetTask.setProgressDescription("Cell type replacement complete");
+    datasetTask.setProgress(1.0f);
+    datasetTask.setFinished();
+
+    _inputClusterDataset = nullptr;  // reset for next invocation
+}
 
 void GradientSurferTransformationPlugin::transformSubsampleByCluster()
 {
@@ -1798,8 +2032,9 @@ mv::DataTypes GradientSurferTransformationPluginFactory::supportedDataTypes() co
 {
     DataTypes supportedTypes;
 
-    // This GradientSurfer transformation plugin is compatible with points datasets
+    // Compatible with both points and cluster datasets
     supportedTypes.append(PointType);
+    supportedTypes.append(ClusterType);
 
     return supportedTypes;
 }
@@ -1808,6 +2043,34 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
 {
     mv::gui::PluginTriggerActions pluginTriggerActions;
     const auto numberOfDatasets = datasets.count();
+
+    // Handle single Cluster dataset right-click — CellTypesReplace only
+    if (numberOfDatasets == 1 && datasets.first()->getDataType() == ClusterType) {
+        Dataset<Clusters> clusterDataset = mv::data().getDataset<Clusters>(datasets.first().getDatasetId());
+        if (!clusterDataset.isValid())
+            return pluginTriggerActions;
+
+        auto makeAction = [this](const QString& name, const QString& desc, const QIcon& icon, auto&& func) {
+            return new mv::gui::PluginTriggerAction(
+                const_cast<GradientSurferTransformationPluginFactory*>(this),
+                this, name, desc, icon,
+                std::forward<decltype(func)>(func)
+            );
+            };
+
+        pluginTriggerActions << makeAction(
+            "GradientSurfer_Replace_Cell_Types",
+            "Replace cluster label names via CSV mapping",
+            QIcon::fromTheme("edit-find-replace"),
+            [this, clusterDataset](mv::gui::PluginTriggerAction&) {
+                auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+                pluginInstance->setInputClusterDataset(clusterDataset);
+                pluginInstance->transformCellTypesReplace();
+            }
+        );
+
+        return pluginTriggerActions;
+    }
 
     if (!PluginFactory::areAllDatasetsOfTheSameType(datasets, PointType))
         return pluginTriggerActions;
@@ -2050,6 +2313,17 @@ mv::gui::PluginTriggerActions GradientSurferTransformationPluginFactory::getPlug
             auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
             pluginInstance->setInputDataset(datasetMain);
             pluginInstance->transformSubsampleByCluster();
+        }
+    );
+
+    pluginTriggerActions << makeAction(
+        "GradientSurfer_Subsample_By_Points",
+        "Subsample rows by points and percent",
+        QIcon::fromTheme("view-filter"),
+        [this, datasetMain](mv::gui::PluginTriggerAction&) {
+            auto pluginInstance = dynamic_cast<GradientSurferTransformationPlugin*>(plugins().requestPlugin(getKind()));
+            pluginInstance->setInputDataset(datasetMain);
+            pluginInstance->transformSubsampleByPoints();
         }
     );
 
